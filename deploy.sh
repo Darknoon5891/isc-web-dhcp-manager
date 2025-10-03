@@ -17,9 +17,22 @@ WEB_ROOT="/var/www/dhcp-manager"
 BACKEND_USER="dhcp-manager"
 PYTHON_VERSION="python3"
 
+# SSL Configuration
+CERT_DAYS=3650  # 10 years
+
+# Check if ISC DHCP Server is already installed before we install packages
+# This helps us determine if the config file is from a previous installation
+DHCP_WAS_INSTALLED=false
+if systemctl list-unit-files 2>/dev/null | grep -q 'isc-dhcp-server.service'; then
+    DHCP_WAS_INSTALLED=true
+fi
+
 echo "Step 1: Installing system dependencies..."
 apt-get update
-apt-get install -y python3.11 python3.11-venv nginx isc-dhcp-server curl
+apt-get install -y python3.11 python3.11-venv nginx curl openssl
+# install isc-dhcp-server as a special case as it writes a default/invalid config and then attempts to start
+# redirect stdout to null until we can write the correct config: 
+sudo apt-get install -y isc-dhcp-server 1>/dev/null
 
 echo ""
 echo "Step 2: Creating backend service user..."
@@ -46,11 +59,106 @@ cp -r "$FRONTEND_SOURCE/build/"* "$WEB_ROOT/"
 chown -R www-data:www-data "$WEB_ROOT"
 
 echo ""
-echo "Step 6: Configuring nginx..."
+
+echo "Step 6: Generating self-signed SSL certificate..."
+
+# Get server FQDN and hostname
+SERVER_FQDN=$(hostname -f)
+SERVER_HOSTNAME=$(hostname -s)
+
+echo "Server FQDN: $SERVER_FQDN"
+echo "Server Hostname: $SERVER_HOSTNAME"
+
+# Create SSL directory
+mkdir -p /etc/nginx/ssl
+
+# Create OpenSSL config for SAN (Subject Alternative Names)
+cat > /tmp/openssl-san.cnf <<EOF
+[req]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+
+[dn]
+C=US
+ST=SomeState
+L=SomeCity
+O=DHCP Manager
+CN=$SERVER_FQDN
+
+[req_ext]
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = $SERVER_FQDN
+DNS.2 = $SERVER_HOSTNAME
+DNS.3 = localhost
+IP.1 = 127.0.0.1
+EOF
+
+# Generate self-signed certificate with SAN
+openssl req -x509 -nodes -days $CERT_DAYS \
+    -newkey rsa:2048 \
+    -keyout /etc/nginx/ssl/dhcp-manager.key \
+    -out /etc/nginx/ssl/dhcp-manager.crt \
+    -config /tmp/openssl-san.cnf \
+    -extensions req_ext
+
+# Set proper permissions
+chmod 600 /etc/nginx/ssl/dhcp-manager.key
+chmod 644 /etc/nginx/ssl/dhcp-manager.crt
+
+# Clean up temp config
+rm -f /tmp/openssl-san.cnf
+
+echo "SSL certificate generated:"
+echo "  Certificate: /etc/nginx/ssl/dhcp-manager.crt"
+echo "  Private Key: /etc/nginx/ssl/dhcp-manager.key"
+echo "  Common Name: $SERVER_FQDN"
+echo "  SAN: $SERVER_FQDN, $SERVER_HOSTNAME, localhost"
+echo ""
+echo "WARNING: This is a self-signed certificate."
+echo "Browsers will show security warnings on first access."
+echo ""
+
+echo "Step 7: Configuring nginx..."
 cat > /etc/nginx/sites-available/dhcp-manager <<'EOF'
+# HTTP server - redirect to HTTPS
 server {
     listen 80;
     server_name _;
+
+    # Redirect all HTTP traffic to HTTPS
+    return 301 https://$host$request_uri;
+}
+
+# HTTPS server
+server {
+    listen 443 ssl http2;
+    server_name _;
+
+    # SSL Certificate (self-signed)
+    ssl_certificate /etc/nginx/ssl/dhcp-manager.crt;
+    ssl_certificate_key /etc/nginx/ssl/dhcp-manager.key;
+
+    # SSL Security Settings
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305';
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # Security Headers
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
 
     root /var/www/dhcp-manager;
     index index.html;
@@ -64,6 +172,14 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_redirect off;
+
+        # Timeouts for API requests
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
     }
 }
 EOF
@@ -74,7 +190,7 @@ nginx -t
 systemctl reload nginx
 
 echo ""
-echo "Step 7: Configuring backend systemd service..."
+echo "Step 8: Configuring backend systemd service..."
 # Generate random secret key
 SECRET_KEY=$(openssl rand -hex 32)
 
@@ -99,8 +215,10 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
+echo "Configuring of backend systemd service completed"
+
 echo ""
-echo "Step 8: Detecting network interface and configuring DHCP..."
+echo "Step 9: Detecting network interface and configuring DHCP..."
 
 # Detect the primary network interface (excluding loopback)
 INTERFACE=$(ip route | grep default | head -n1 | awk '{print $5}')
@@ -165,10 +283,76 @@ echo "  Netmask: $NETMASK"
 echo "  Router: $ROUTER"
 echo "  DHCP Range: $RANGE_START - $RANGE_END"
 
-# Create dhcpd.conf if it doesn't exist
+# Intelligent DHCP config creation - handles multiple scenarios
+mkdir -p /etc/dhcp
+SHOULD_CREATE_CONFIG=false
+CONFIG_DECISION_REASON=""
+
 if [ ! -f /etc/dhcp/dhcpd.conf ]; then
-    echo "Creating dhcpd.conf with subnet configuration..."
-    mkdir -p /etc/dhcp
+    # Scenario 1: No config file exists at all
+    SHOULD_CREATE_CONFIG=true
+    CONFIG_DECISION_REASON="Config file does not exist"
+
+elif [ "$DHCP_WAS_INSTALLED" = false ]; then
+    # ISC DHCP was just installed by this script - check if config is usable
+    echo "Analyzing freshly installed DHCP config..."
+
+    # Count non-comment, non-empty lines (active configuration)
+    ACTIVE_LINES=$(grep -v '^#' /etc/dhcp/dhcpd.conf | grep -v '^[[:space:]]*$' | wc -l)
+
+    # Check if config contains a subnet declaration (required for valid config)
+    HAS_SUBNET=$(grep -c '^[[:space:]]*subnet' /etc/dhcp/dhcpd.conf 2>/dev/null || true)
+    HAS_SUBNET=${HAS_SUBNET:-0}
+
+    if [ "$HAS_SUBNET" -eq 0 ]; then
+        # Scenario 2: Fresh install without subnet declaration (default ISC install)
+        # Default has ~5 active lines but no subnet = not usable
+        SHOULD_CREATE_CONFIG=true
+        CONFIG_DECISION_REASON="Fresh install with default config (no subnet declaration, $ACTIVE_LINES active lines)"
+    else
+        # Has subnet declaration - could be from previous installation or manual edit
+        # Check if it looks like it was manually created (has host declarations or custom settings)
+        HAS_HOST_DECLARATIONS=$(grep -c '^[[:space:]]*host[[:space:]]' /etc/dhcp/dhcpd.conf 2>/dev/null || true)
+        HAS_HOST_DECLARATIONS=${HAS_HOST_DECLARATIONS:-0}
+
+        if [ "$HAS_HOST_DECLARATIONS" -gt 0 ]; then
+            # Scenario 3: Has subnet AND host declarations - definitely a real config
+            SHOULD_CREATE_CONFIG=false
+            CONFIG_DECISION_REASON="Existing config with $HAS_SUBNET subnet(s) and $HAS_HOST_DECLARATIONS host(s) - preserving"
+        else
+            # Scenario 4: Has subnet but no hosts - check if subnet matches our detected network
+            # If it matches, likely from a previous run of this script
+            # If different, preserve it as user-configured
+            EXISTING_SUBNET=$(grep '^[[:space:]]*subnet' /etc/dhcp/dhcpd.conf | head -n1 | awk '{print $2}')
+
+            if [ "$EXISTING_SUBNET" = "$NETWORK" ]; then
+                # Same subnet as we would create - safe to recreate
+                SHOULD_CREATE_CONFIG=true
+                CONFIG_DECISION_REASON="Config has our auto-generated subnet ($NETWORK) but no hosts - recreating"
+            else
+                # Different subnet - user configured, preserve it
+                SHOULD_CREATE_CONFIG=false
+                CONFIG_DECISION_REASON="User-configured subnet ($EXISTING_SUBNET) found - preserving"
+            fi
+        fi
+    fi
+else
+    # Scenario 5: ISC DHCP was already installed before running this script
+    SHOULD_CREATE_CONFIG=false
+    CONFIG_DECISION_REASON="Service was already installed, preserving existing config"
+fi
+
+echo "Config decision: $CONFIG_DECISION_REASON"
+
+if [ "$SHOULD_CREATE_CONFIG" = true ]; then
+    # Backup existing config if it exists
+    if [ -f /etc/dhcp/dhcpd.conf ]; then
+        BACKUP_FILE="/etc/dhcp/dhcpd.conf.backup.$(date +%Y%m%d_%H%M%S)"
+        echo "Backing up existing config to: $BACKUP_FILE"
+        cp /etc/dhcp/dhcpd.conf "$BACKUP_FILE"
+    fi
+
+    echo "Creating new dhcpd.conf with subnet configuration..."
     cat > /etc/dhcp/dhcpd.conf <<DHCPEOF
 # DHCP Server Configuration
 default-lease-time 600;
@@ -184,9 +368,10 @@ subnet $NETWORK netmask $NETMASK {
 
 # Static host reservations will appear below
 DHCPEOF
+    echo "dhcpd.conf created successfully"
 else
-    echo "dhcpd.conf already exists, skipping subnet configuration"
-    echo "WARNING, If the alreadt existing dhcpd.conf does not contain a valid configuration e.g. a default subnet the service will fail to start"
+    echo "Keeping existing dhcpd.conf"
+    echo "WARNING: If the existing config is invalid, the DHCP service will fail to start"
 fi
 
 # Configure ISC DHCP Server interface
@@ -214,7 +399,7 @@ DHCPDEFEOF
 
 echo "DHCP configuration completed"
 echo ""
-echo "Step 9: Configuring DHCP file permissions..."
+echo "Step 10: Configuring DHCP file permissions..."
 
 # Create backup directory
 mkdir -p /etc/dhcp/backups
@@ -266,12 +451,18 @@ POLKITEOF
 chmod 644 /etc/polkit-1/rules.d/50-dhcp-manager.rules
 
 echo ""
-echo "Step 10: Starting services..."
+echo "Step 11: Starting services..."
 systemctl daemon-reload
 systemctl enable dhcp-manager
 systemctl start dhcp-manager
 systemctl enable nginx
 systemctl enable isc-dhcp-server
+
+# If we recreated the DHCP config, restart the service to apply changes
+if [ "$SHOULD_CREATE_CONFIG" = true ]; then
+    echo "Restarting ISC DHCP Server with new configuration..."
+    systemctl restart isc-dhcp-server
+fi
 
 echo ""
 echo "=== Deployment Complete ==="
@@ -281,9 +472,23 @@ systemctl status dhcp-manager --no-pager || true
 echo ""
 systemctl status nginx --no-pager || true
 echo ""
-echo "Access the application at: http://$(hostname -I | awk '{print $1}')"
+echo "=========================================="
+echo "Access the application at: https://$(hostname -I | awk '{print $1}')"
+echo "  or: https://$(hostname -f)"
+echo "=========================================="
+echo ""
+echo "IMPORTANT: Self-signed SSL certificate in use"
+echo "  Your browser will show a security warning on first access"
+echo "  This is expected. Click 'Advanced' and 'Proceed' to continue"
+echo ""
+echo "SSL Certificate Details:"
+echo "  Certificate: /etc/nginx/ssl/dhcp-manager.crt"
+echo "  Private Key: /etc/nginx/ssl/dhcp-manager.key"
+echo "  Common Name: $(hostname -f)"
+echo "  Validity: 10 years"
 echo ""
 echo "Useful commands:"
 echo "  - View backend logs: journalctl -u dhcp-manager -f"
 echo "  - View DHCP logs: journalctl -u isc-dhcp-server -f"
 echo "  - Restart backend: systemctl restart dhcp-manager"
+echo "  - View certificate: openssl x509 -in /etc/nginx/ssl/dhcp-manager.crt -text -noout"
