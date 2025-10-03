@@ -15,30 +15,64 @@ A web-based interface for managing ISC DHCP Server configuration files. Provides
 
 <b>Built and tested on Debian 12 (amd64) - Using Python 3.11</b>
 
-### Clone Repository
+### Automated Deployment (Recommended for Production)
 
-```bash
-git clone <repository-url>
-cd isc-dhcp-rontend
-```
+The easiest way to deploy this application is using the included deployment script:
 
-### Backend Setup
+1. **Clone the repository:**
+   ```bash
+   git clone <repository-url>
+   cd isc-dhcp-rontend
+   ```
+
+2. **Build the frontend:**
+   ```bash
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   ```
+
+3. **Run the deployment script:**
+   ```bash
+   sudo bash deploy.sh
+   ```
+
+The deployment script will automatically:
+- Install system dependencies (Python 3.11, nginx, isc-dhcp-server)
+- Create a dedicated `dhcp-manager` system user
+- Set up the backend with gunicorn
+- Configure nginx as a reverse proxy
+- Set up proper file permissions for `/etc/dhcp/dhcpd.conf`
+- Create systemd service for auto-start
+- Configure sudoers for service management
+- Detect network interface and configure DHCP server
+
+After deployment completes, the application will be accessible at `http://<your-server-ip>`
+
+**Important Notes:**
+- The script expects the application files to be in `/app` directory. Adjust `APP_SOURCE` and `FRONTEND_SOURCE` variables in `deploy.sh` if your path differs.
+- The script will auto-detect your network interface and configure DHCP subnet automatically
+- DHCP range is set to `.100 - .200` by default (configurable in the script)
+
+### Manual Development Setup
+
+For development and testing purposes:
+
+#### Backend Setup
 
 1. Navigate to the backend directory:
-
    ```bash
    cd backend
    ```
 
 2. Create and activate a Python virtual environment:
-
    ```bash
    python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. Install dependencies:
-
    ```bash
    pip install -r requirements.txt
    ```
@@ -50,16 +84,14 @@ cd isc-dhcp-rontend
 
 The backend will start on `http://localhost:5000`.
 
-### Frontend Setup
+#### Frontend Setup
 
 1. Navigate to the frontend directory:
-
    ```bash
    cd frontend
    ```
 
 2. Install dependencies:
-
    ```bash
    npm install
    ```
@@ -106,9 +138,11 @@ In development mode, the application:
 - Disables service restart functionality
 - Creates automatic backups in `./test_backups/`
 
-### Production Mode
+### Production Mode (Manual Configuration)
 
-For production deployment on a Linux server:
+**Note:** For automated deployment, see the "Automated Deployment" section in Quick Start above.
+
+For manual production deployment on a Linux server:
 
 #### 1. Environment Configuration
 
@@ -135,14 +169,17 @@ The Flask application needs read/write access to the DHCP configuration:
 # Create backup directory
 sudo mkdir -p /etc/dhcp/backups
 
-# Set ownership (replace 'flask-user' with your application user)
-sudo chown flask-user:flask-user /etc/dhcp/dhcpd.conf
-sudo chown flask-user:flask-user /etc/dhcp/backups
+# Set ownership (owner must remain root, change group only)
+sudo chown root:dhcp-manager /etc/dhcp/dhcpd.conf
+sudo chmod 660 /etc/dhcp/dhcpd.conf
 
-# Or use group permissions
-sudo chgrp flask-user /etc/dhcp/dhcpd.conf /etc/dhcp/backups
-sudo chmod 664 /etc/dhcp/dhcpd.conf
-sudo chmod 775 /etc/dhcp/backups
+# Allow directory access for temp file creation (atomic writes)
+sudo chown root:dhcp-manager /etc/dhcp
+sudo chmod 775 /etc/dhcp
+
+# Set backup directory ownership
+sudo chown dhcp-manager:dhcp-manager /etc/dhcp/backups
+sudo chmod 770 /etc/dhcp/backups
 ```
 
 #### 3. Sudo Permissions for Service Restart

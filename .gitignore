@@ -230,4 +230,3 @@ test_backups/
 
 # Production secrets
 .env.production
-deploy.sh
