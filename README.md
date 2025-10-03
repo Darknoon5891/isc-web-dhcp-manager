@@ -93,7 +93,6 @@ dhcp-manager/
 │   │       └── api.tsx     # API service layer
 │   ├── package.json        # Node.js dependencies
 │   └── tsconfig.json       # TypeScript configuration
-├── CLAUDE.md               # Project specifications
 └── README.md               # This file
 ```
 
