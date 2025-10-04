@@ -218,7 +218,63 @@ EOF
 echo "Configuring of backend systemd service completed"
 
 echo ""
-echo "Step 9: Detecting network interface and configuring DHCP..."
+echo "Step 9: Creating application configuration directory..."
+
+# Create /etc/isc-web-dhcp-manager directory for app config
+mkdir -p /etc/isc-web-dhcp-manager
+mkdir -p /etc/isc-web-dhcp-manager/backups
+chown -R "$BACKEND_USER":"$BACKEND_USER" /etc/isc-web-dhcp-manager
+chmod 750 /etc/isc-web-dhcp-manager
+chmod 770 /etc/isc-web-dhcp-manager/backups
+
+# Create application config file
+cat > /etc/isc-web-dhcp-manager/config.conf <<APPCONFEOF
+# ISC Web DHCP Manager Configuration
+
+# Flask Environment
+FLASK_ENV=production
+
+# Security
+SECRET_KEY=$SECRET_KEY
+
+# DHCP Configuration File Path
+DHCP_CONFIG_PATH=/etc/dhcp/dhcpd.conf
+
+# DHCP Backup Directory
+DHCP_BACKUP_DIR=/etc/isc-web-dhcp-manager/backups
+
+# DHCP Service Name
+DHCP_SERVICE_NAME=isc-dhcp-server
+
+# Application Settings
+ALLOW_SERVICE_RESTART=true
+MAX_HOSTNAME_LENGTH=255
+MAX_BACKUPS=10
+REQUIRE_SUDO=true
+
+# CORS Settings
+CORS_ORIGINS=*
+
+# Logging
+LOG_LEVEL=INFO
+LOGGING_PATH=/var/log/isc-web-dhcp-manager
+
+# Debug Mode
+FLASK_DEBUG=false
+APPCONFEOF
+
+chown "$BACKEND_USER":"$BACKEND_USER" /etc/isc-web-dhcp-manager/config.conf
+chmod 640 /etc/isc-web-dhcp-manager/config.conf
+
+# Create logging directory
+mkdir -p /var/log/isc-web-dhcp-manager
+chown "$BACKEND_USER":"$BACKEND_USER" /var/log/isc-web-dhcp-manager
+chmod 750 /var/log/isc-web-dhcp-manager
+
+echo "Created /etc/isc-web-dhcp-manager for application configuration"
+
+echo ""
+echo "Step 10: Detecting network interface and configuring DHCP..."
 
 # Detect the primary network interface (excluding loopback)
 INTERFACE=$(ip route | grep default | head -n1 | awk '{print $5}')
@@ -349,7 +405,7 @@ echo "Config decision: $CONFIG_DECISION_REASON"
 if [ "$SHOULD_CREATE_CONFIG" = true ]; then
     # Backup existing config if it exists
     if [ -f /etc/dhcp/dhcpd.conf ]; then
-        BACKUP_FILE="/etc/dhcp/dhcpd.conf.backup.$(date +%Y%m%d_%H%M%S)"
+        BACKUP_FILE="/etc/isc-web-dhcp-manager/backups/dhcpd.conf.backup.$(date +%Y%m%d_%H%M%S)"
         echo "Backing up existing config to: $BACKUP_FILE"
         cp /etc/dhcp/dhcpd.conf "$BACKUP_FILE"
     fi
@@ -401,12 +457,7 @@ DHCPDEFEOF
 
 echo "DHCP configuration completed"
 echo ""
-echo "Step 10: Configuring DHCP file permissions..."
-
-# Create backup directory
-mkdir -p /etc/dhcp/backups
-chown "$BACKEND_USER":"$BACKEND_USER" /etc/dhcp/backups
-chmod 770 /etc/dhcp/backups
+echo "Step 11: Configuring DHCP file permissions..."
 
 # Allow backend user to read/write dhcpd.conf
 # Owner must remain root, only change group
@@ -453,7 +504,7 @@ POLKITEOF
 chmod 644 /etc/polkit-1/rules.d/50-dhcp-manager.rules
 
 echo ""
-echo "Step 11: Starting services..."
+echo "Step 12: Starting services..."
 systemctl daemon-reload
 systemctl enable dhcp-manager
 systemctl start dhcp-manager

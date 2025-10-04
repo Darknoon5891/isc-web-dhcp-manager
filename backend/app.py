@@ -1,5 +1,5 @@
 """
-DHCP Configuration Manager Flask Application
+ISC Web DHCP Configuration Manager Flask Application
 Provides REST API for managing ISC DHCP Server configuration
 """
 
@@ -47,7 +47,7 @@ def create_app():
         """Health check endpoint"""
         return jsonify({
             'status': 'running',
-            'service': 'DHCP Configuration Manager',
+            'service': 'ISC Web DHCP Configuration Manager',
             'version': '1.0.0'
         })
 
