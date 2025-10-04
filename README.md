@@ -20,12 +20,14 @@ A web-based interface for managing ISC DHCP Server configuration files. Provides
 The easiest way to deploy this application is using the included deployment script:
 
 1. **Clone the repository:**
+
    ```bash
    git clone <repository-url>
    cd isc-dhcp-rontend
    ```
 
 2. **Build the frontend:**
+
    ```bash
    cd frontend
    npm install
@@ -39,21 +41,34 @@ The easiest way to deploy this application is using the included deployment scri
    ```
 
 The deployment script will automatically:
+
 - Install system dependencies (Python 3.11, nginx, isc-dhcp-server)
 - Create a dedicated `dhcp-manager` system user
 - Set up the backend with gunicorn
-- Configure nginx as a reverse proxy
+- **Generate self-signed SSL certificate** (10-year validity with FQDN, hostname, and localhost in SAN)
+- **Configure nginx with HTTPS** (TLS 1.2/1.3, security headers, HTTP→HTTPS redirect)
 - Set up proper file permissions for `/etc/dhcp/dhcpd.conf`
 - Create systemd service for auto-start
 - Configure sudoers for service management
-- Detect network interface and configure DHCP server
+- **Intelligently detect and configure DHCP**:
+  - Preserves existing configs with host declarations
+  - Recreates default/invalid configs from fresh ISC DHCP installs
+  - Auto-detects network interface and subnet
+  - Automatically restarts DHCP service when config is recreated
 
-After deployment completes, the application will be accessible at `http://<your-server-ip>`
+After deployment completes, the application will be accessible at `https://<your-server-ip>`
 
 **Important Notes:**
+
 - The script expects the application files to be in `/app` directory. Adjust `APP_SOURCE` and `FRONTEND_SOURCE` variables in `deploy.sh` if your path differs.
 - The script will auto-detect your network interface and configure DHCP subnet automatically
 - DHCP range is set to `.100 - .200` by default (configurable in the script)
+- **Self-signed SSL certificate**: Browsers will show security warnings on first access (click "Advanced" → "Proceed")
+- The script intelligently handles ISC DHCP configuration scenarios:
+  - Fresh install with no config → creates new config
+  - Fresh install with default config (commented out) → creates new config
+  - Existing config with hosts → preserves user configuration
+  - Reinstall scenarios → preserves or recreates based on content analysis
 
 ### Manual Development Setup
 
@@ -62,17 +77,20 @@ For development and testing purposes:
 #### Backend Setup
 
 1. Navigate to the backend directory:
+
    ```bash
    cd backend
    ```
 
 2. Create and activate a Python virtual environment:
+
    ```bash
    python3 -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
    ```
 
 3. Install dependencies:
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -87,11 +105,13 @@ The backend will start on `http://localhost:5000`.
 #### Frontend Setup
 
 1. Navigate to the frontend directory:
+
    ```bash
    cd frontend
    ```
 
 2. Install dependencies:
+
    ```bash
    npm install
    ```
