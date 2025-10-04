@@ -7,8 +7,11 @@ import re
 import os
 import shutil
 import tempfile
+import logging
 from datetime import datetime
 from typing import List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class DHCPHost:
@@ -251,24 +254,29 @@ class DHCPParser:
         """Create a backup of the current configuration"""
         if not os.path.exists(self.backup_dir):
             os.makedirs(self.backup_dir, exist_ok=True)
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         backup_filename = f"dhcpd.conf.backup_{timestamp}"
         backup_path = os.path.join(self.backup_dir, backup_filename)
-        
+
         if os.path.exists(self.config_path):
             shutil.copy2(self.config_path, backup_path)
-        
+            logger.info(f"Created DHCP config backup: {backup_filename}")
+
         return backup_path
     
     def read_config(self) -> str:
         """Read the current DHCP configuration"""
         try:
             with open(self.config_path, 'r') as f:
-                return f.read()
+                content = f.read()
+                logger.debug(f"Read DHCP config file: {len(content)} bytes")
+                return content
         except FileNotFoundError:
+            logger.warning(f"DHCP config file not found: {self.config_path}")
             return ""
         except PermissionError:
+            logger.error(f"Permission denied reading DHCP config: {self.config_path}")
             raise PermissionError(f"Permission denied reading {self.config_path}")
     
     def write_config(self, content: str) -> None:
@@ -308,6 +316,7 @@ class DHCPParser:
 
                 # Atomic rename (overwrites existing file)
                 os.replace(temp_path, self.config_path)
+                logger.info(f"Wrote DHCP config file: {len(content)} bytes")
 
             except Exception as e:
                 # Clean up temp file on error
@@ -316,17 +325,21 @@ class DHCPParser:
                         os.unlink(temp_path)
                     except OSError:
                         pass
+                logger.error(f"Failed to write DHCP config atomically: {str(e)}")
                 raise
 
         except PermissionError:
+            logger.error(f"Permission denied writing to DHCP config: {self.config_path}")
             raise PermissionError(f"Permission denied writing to {self.config_path}")
         except Exception as e:
+            logger.error(f"Failed to write DHCP config file: {str(e)}")
             raise IOError(f"Failed to write config file: {str(e)}")
     
     def parse_hosts(self) -> List[DHCPHost]:
         """Parse all host declarations from the configuration"""
         content = self.read_config()
         hosts = []
+        logger.debug("Parsing DHCP host declarations")
 
         # Split content into reasonable chunks to prevent ReDoS
         # Process line by line or in smaller blocks
@@ -379,6 +392,7 @@ class DHCPParser:
             else:
                 i += 1
 
+        logger.debug(f"Parsed {len(hosts)} DHCP host declarations")
         return hosts
     
     def get_host(self, hostname: str) -> Optional[DHCPHost]:
@@ -448,9 +462,10 @@ class DHCPParser:
         else:
             # No existing hosts, add at the end
             content += "\n\n# Static host reservations\n" + host_config + "\n"
-        
+
         # Write updated content
         self.write_config(content)
+        logger.info(f"Added DHCP host: {hostname} (MAC: {mac}, IP: {ip})")
         return True
     
     def update_host(self, hostname: str, new_mac: str = None, new_ip: str = None) -> bool:
@@ -478,13 +493,18 @@ class DHCPParser:
         self.create_backup()
         
         # Update the host
+        changes = []
         if new_mac:
             host.mac = new_mac.upper()
+            changes.append(f"MAC: {new_mac}")
         if new_ip:
             host.ip = new_ip
-        
+            changes.append(f"IP: {new_ip}")
+
         # Replace the host in the configuration
-        return self._replace_host_in_config(hostname, host)
+        result = self._replace_host_in_config(hostname, host)
+        logger.info(f"Updated DHCP host: {hostname} ({', '.join(changes)})")
+        return result
     
     def delete_host(self, hostname: str) -> bool:
         """Delete a host reservation"""
@@ -530,6 +550,7 @@ class DHCPParser:
         new_content = re.sub(r'\n\s*\n\s*\n', '\n\n', new_content)
 
         self.write_config(new_content)
+        logger.info(f"Deleted DHCP host: {hostname}")
         return True
     
     def _replace_host_in_config(self, hostname: str, new_host: DHCPHost) -> bool:
@@ -574,37 +595,44 @@ class DHCPParser:
         try:
             # Basic syntax validation
             content = self.read_config()
-            
+
             # Check for balanced braces
             brace_count = content.count('{') - content.count('}')
             if brace_count != 0:
+                logger.warning(f"DHCP config validation failed: Unbalanced braces ({brace_count})")
                 return False, f"Unbalanced braces in configuration (difference: {brace_count})"
-            
+
             # Check for duplicate hostnames
             hosts = self.parse_hosts()
             hostnames = [host.hostname for host in hosts]
             if len(hostnames) != len(set(hostnames)):
+                logger.warning("DHCP config validation failed: Duplicate hostnames")
                 return False, "Duplicate hostnames found in configuration"
-            
+
             # Check for duplicate MAC addresses
             macs = [host.mac for host in hosts]
             if len(macs) != len(set(macs)):
+                logger.warning("DHCP config validation failed: Duplicate MAC addresses")
                 return False, "Duplicate MAC addresses found in configuration"
-            
+
             # Check for duplicate IP addresses
             ips = [host.ip for host in hosts]
             if len(ips) != len(set(ips)):
+                logger.warning("DHCP config validation failed: Duplicate IP addresses")
                 return False, "Duplicate IP addresses found in configuration"
-            
+
+            logger.info("DHCP config validation passed")
             return True, "Configuration is valid"
 
         except Exception as e:
+            logger.error(f"DHCP config validation error: {str(e)}")
             return False, f"Configuration validation error: {str(e)}"
 
     def parse_subnets(self) -> List[DHCPSubnet]:
         """Parse all subnet declarations from the configuration"""
         content = self.read_config()
         subnets = []
+        logger.debug("Parsing DHCP subnet declarations")
 
         lines = content.split('\n')
         i = 0
@@ -655,6 +683,7 @@ class DHCPParser:
             else:
                 i += 1
 
+        logger.debug(f"Parsed {len(subnets)} DHCP subnet declarations")
         return subnets
 
     def get_subnet(self, network: str) -> Optional[DHCPSubnet]:
@@ -724,6 +753,7 @@ class DHCPParser:
 
         # Write updated content
         self.write_config(content)
+        logger.info(f"Added DHCP subnet: {network}/{netmask}")
         return True
 
     def update_subnet(self, network: str, new_netmask: str = None, new_range_start: str = None,
@@ -763,7 +793,9 @@ class DHCPParser:
         subnet.options = options
 
         # Replace in configuration
-        return self._replace_subnet_in_config(network, subnet)
+        result = self._replace_subnet_in_config(network, subnet)
+        logger.info(f"Updated DHCP subnet: {network}")
+        return result
 
     def delete_subnet(self, network: str) -> bool:
         """Delete a subnet declaration"""
@@ -809,6 +841,7 @@ class DHCPParser:
         new_content = re.sub(r'\n\s*\n\s*\n', '\n\n', new_content)
 
         self.write_config(new_content)
+        logger.info(f"Deleted DHCP subnet: {network}")
         return True
 
     def _replace_subnet_in_config(self, network: str, new_subnet: DHCPSubnet) -> bool:
@@ -850,6 +883,7 @@ class DHCPParser:
         """Parse all zone declarations from the configuration"""
         content = self.read_config()
         zones = []
+        logger.debug("Parsing DHCP zone declarations")
 
         lines = content.split('\n')
         i = 0
@@ -905,6 +939,7 @@ class DHCPParser:
             else:
                 i += 1
 
+        logger.debug(f"Parsed {len(zones)} DHCP zone declarations")
         return zones
 
     def get_zone(self, zone_name: str) -> Optional[DHCPZone]:
@@ -962,6 +997,7 @@ class DHCPParser:
 
         # Write updated content
         self.write_config(content)
+        logger.info(f"Added DHCP zone: {zone_name} (primary: {primary})")
         return True
 
     def update_zone(self, zone_name: str, new_primary: str = None, new_key_name: str = None,
@@ -993,7 +1029,9 @@ class DHCPParser:
         zone.secondary = secondary
 
         # Replace in configuration
-        return self._replace_zone_in_config(zone_name, zone)
+        result = self._replace_zone_in_config(zone_name, zone)
+        logger.info(f"Updated DHCP zone: {zone_name}")
+        return result
 
     def delete_zone(self, zone_name: str) -> bool:
         """Delete a zone declaration"""
@@ -1044,10 +1082,12 @@ class DHCPParser:
         new_content_zones = re.sub(r'\n\s*\n\s*\n', '\n\n', new_content_zones)
 
         self.write_config(new_content_zones)
+        logger.info(f"Deleted DHCP zone: {zone_name}")
         return True
 
     def parse_global_config(self) -> DHCPGlobalConfig:
         """Parse global configuration settings from the DHCP config file"""
+        logger.debug("Parsing global DHCP configuration")
         content = self.read_config()
         lines = content.split('\n')
 
@@ -1295,6 +1335,7 @@ class DHCPParser:
 
         new_content = '\n'.join(new_lines)
         self.write_config(new_content)
+        logger.info("Updated global DHCP configuration")
         return True
 
     def _add_missing_global_settings(self, lines: List[str], config: DHCPGlobalConfig, replaced: set) -> None:

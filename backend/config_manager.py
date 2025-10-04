@@ -6,8 +6,11 @@ Uses /etc/isc-web-dhcp-manager/config_schema.json for field definitions
 
 import os
 import json
+import logging
 import tempfile
 from typing import Dict, List, Any, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
@@ -24,20 +27,26 @@ class ConfigManager:
 
         self.schema_path = schema_path
         self.schema = self._load_schema()
+        logger.debug(f"ConfigManager initialized: config={config_path}, schema={schema_path}")
 
     def _load_schema(self) -> Dict[str, Any]:
         """Load configuration schema from JSON file"""
         try:
             with open(self.schema_path, 'r') as f:
-                return json.load(f)
+                schema = json.load(f)
+                logger.info(f"Loaded app config schema: {len(schema.get('properties', {}))} properties defined")
+                return schema
         except FileNotFoundError:
+            logger.error(f"App config schema file not found: {self.schema_path}")
             raise FileNotFoundError(f"Schema file not found: {self.schema_path}")
         except json.JSONDecodeError as e:
+            logger.error(f"Invalid app config schema JSON: {e}")
             raise ValueError(f"Invalid schema JSON: {e}")
 
     def read_config(self) -> Dict[str, str]:
         """Read configuration file and return as dictionary"""
         if not os.path.exists(self.config_path):
+            logger.error(f"App config file not found: {self.config_path}")
             raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
 
         config = {}
@@ -60,9 +69,11 @@ class ConfigManager:
                         if key:
                             config[key] = value
 
+            logger.debug(f"Read app config file: {len(config)} settings loaded")
             return config
 
         except Exception as e:
+            logger.error(f"Failed to read app config file: {str(e)}")
             raise IOError(f"Failed to read config file: {str(e)}")
 
     def write_config(self, config: Dict[str, str]) -> None:
@@ -71,6 +82,7 @@ class ConfigManager:
             # Validate before writing
             errors = self.validate_config(config)
             if errors:
+                logger.warning(f"App config validation failed before write: {'; '.join(errors)}")
                 raise ValueError(f"Configuration validation failed: {'; '.join(errors)}")
 
             # Create temporary file in same directory
@@ -134,6 +146,7 @@ class ConfigManager:
 
                 # Atomic rename
                 os.replace(temp_path, self.config_path)
+                logger.info(f"Wrote app config file: {len(config)} settings")
 
             except Exception as e:
                 # Clean up temp file on error
@@ -142,15 +155,19 @@ class ConfigManager:
                         os.unlink(temp_path)
                     except OSError:
                         pass
+                logger.error(f"Failed to write app config atomically: {str(e)}")
                 raise
 
         except PermissionError:
+            logger.error(f"Permission denied writing app config: {self.config_path}")
             raise PermissionError(f"Permission denied writing to {self.config_path}")
         except Exception as e:
+            logger.error(f"Failed to write app config file: {str(e)}")
             raise IOError(f"Failed to write config file: {str(e)}")
 
     def validate_config(self, config: Dict[str, str]) -> List[str]:
         """Validate configuration against schema, return list of errors"""
+        logger.debug(f"Validating app config: {len(config)} settings")
         errors = []
         properties = self.schema.get('properties', {})
         required = self.schema.get('required', [])
@@ -201,10 +218,15 @@ class ConfigManager:
                         valid_values = ', '.join(props['enum'])
                         errors.append(f"{key} must be one of: {valid_values}")
 
+        if errors:
+            logger.warning(f"App config validation found {len(errors)} errors: {'; '.join(errors)}")
+        else:
+            logger.debug("App config validation passed")
         return errors
 
     def get_schema(self) -> Dict[str, Any]:
         """Get configuration schema for frontend"""
+        logger.debug("Retrieved app config schema")
         return self.schema
 
     def mask_sensitive_values(self, config: Dict[str, str]) -> Dict[str, str]:
@@ -212,6 +234,7 @@ class ConfigManager:
         masked = config.copy()
         properties = self.schema.get('properties', {})
 
+        masked_count = 0
         for key, props in properties.items():
             if props.get('sensitive') and key in masked:
                 # Show first 8 chars, mask the rest
@@ -220,5 +243,7 @@ class ConfigManager:
                     masked[key] = value[:8] + '*' * (len(value) - 8)
                 else:
                     masked[key] = '*' * len(value)
+                masked_count += 1
 
+        logger.debug(f"Masked {masked_count} sensitive config values")
         return masked
