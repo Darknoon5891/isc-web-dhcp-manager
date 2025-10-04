@@ -6,14 +6,17 @@
 import React, { useState, useEffect } from "react";
 import HostList from "./components/HostList";
 import HostForm from "./components/HostForm";
+import SubnetList from "./components/SubnetList";
+import SubnetForm from "./components/SubnetForm";
 import ConfigViewer from "./components/ConfigViewer";
-import apiService, { DHCPHost, APIError } from "./services/api";
+import apiService, { DHCPHost, DHCPSubnet, APIError } from "./services/api";
 
-type ActiveTab = "hosts" | "config";
+type ActiveTab = "hosts" | "subnets" | "config";
 
 function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("hosts");
   const [editingHost, setEditingHost] = useState<DHCPHost | null>(null);
+  const [editingSubnet, setEditingSubnet] = useState<DHCPSubnet | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [appStatus, setAppStatus] = useState<{
@@ -52,6 +55,7 @@ function App() {
     setActiveTab(tab);
     // Close any open forms when switching tabs
     setEditingHost(null);
+    setEditingSubnet(null);
     setShowAddForm(false);
   };
 
@@ -65,14 +69,26 @@ function App() {
     setShowAddForm(true);
   };
 
+  const handleAddSubnet = () => {
+    setEditingSubnet(null);
+    setShowAddForm(true);
+  };
+
+  const handleEditSubnet = (subnet: DHCPSubnet) => {
+    setEditingSubnet(subnet);
+    setShowAddForm(true);
+  };
+
   const handleFormSave = () => {
     setEditingHost(null);
+    setEditingSubnet(null);
     setShowAddForm(false);
     triggerRefresh();
   };
 
   const handleFormCancel = () => {
     setEditingHost(null);
+    setEditingSubnet(null);
     setShowAddForm(false);
   };
 
@@ -80,7 +96,7 @@ function App() {
     setRefreshTrigger((prev) => prev + 1);
   };
 
-  const isFormVisible = showAddForm || editingHost !== null;
+  const isFormVisible = showAddForm || editingHost !== null || editingSubnet !== null;
 
   return (
     <div>
@@ -111,6 +127,12 @@ function App() {
             onClick={() => handleTabChange("hosts")}
           >
             Host Reservations
+          </button>
+          <button
+            className={`tab ${activeTab === "subnets" ? "active" : ""}`}
+            onClick={() => handleTabChange("subnets")}
+          >
+            Subnets
           </button>
           <button
             className={`tab ${activeTab === "config" ? "active" : ""}`}
@@ -144,6 +166,42 @@ function App() {
             ) : (
               <HostList
                 onEditHost={handleEditHost}
+                onRefresh={triggerRefresh}
+                refreshTrigger={refreshTrigger}
+              />
+            )}
+          </div>
+        )}
+
+        {activeTab === "subnets" && (
+          <div>
+            {!isFormVisible && (
+              <div style={{ marginBottom: "20px" }}>
+                <button
+                  className="btn btn-success"
+                  onClick={handleAddSubnet}
+                  disabled={!appStatus.connected}
+                >
+                  Add Subnet
+                </button>
+              </div>
+            )}
+
+            {isFormVisible && editingSubnet !== null ? (
+              <SubnetForm
+                editingSubnet={editingSubnet}
+                onSave={handleFormSave}
+                onCancel={handleFormCancel}
+              />
+            ) : isFormVisible && !editingHost ? (
+              <SubnetForm
+                editingSubnet={null}
+                onSave={handleFormSave}
+                onCancel={handleFormCancel}
+              />
+            ) : (
+              <SubnetList
+                onEditSubnet={handleEditSubnet}
                 onRefresh={triggerRefresh}
                 refreshTrigger={refreshTrigger}
               />

@@ -7,7 +7,7 @@ import os
 import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dhcp_parser import DHCPParser, DHCPHost
+from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet
 from config import get_config, create_test_config
 
 
@@ -323,14 +323,109 @@ def create_app():
 
         except Exception as e:
             return jsonify({'error': 'Failed to list backups', 'message': str(e)}), 500
-    
+
+    # Subnet management endpoints
+    @app.route(f"{app.config['API_PREFIX']}/subnets", methods=['GET'])
+    def get_subnets():
+        """Get all subnet declarations"""
+        try:
+            subnets = dhcp_parser.parse_subnets()
+            return jsonify([subnet.to_dict() for subnet in subnets])
+        except PermissionError:
+            return jsonify({'error': 'Permission denied accessing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to read subnets', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/subnets/<network>", methods=['GET'])
+    def get_subnet(network):
+        """Get a specific subnet"""
+        try:
+            subnet = dhcp_parser.get_subnet(network)
+            if subnet:
+                return jsonify(subnet.to_dict())
+            return jsonify({'error': 'Subnet not found'}), 404
+        except PermissionError:
+            return jsonify({'error': 'Permission denied accessing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to read subnet', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/subnets", methods=['POST'])
+    def add_subnet():
+        """Add a new subnet"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No JSON data provided'}), 400
+
+            network = data.get('network')
+            netmask = data.get('netmask')
+            range_start = data.get('range_start')
+            range_end = data.get('range_end')
+            options = data.get('options', {})
+
+            if not all([network, netmask]):
+                return jsonify({'error': 'network and netmask are required'}), 400
+
+            dhcp_parser.add_subnet(network, netmask, range_start, range_end, options)
+
+            # Return the created subnet
+            new_subnet = dhcp_parser.get_subnet(network)
+            return jsonify(new_subnet.to_dict()), 201
+
+        except ValueError as e:
+            return jsonify({'error': 'Validation error', 'message': str(e)}), 400
+        except PermissionError:
+            return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to add subnet', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/subnets/<network>", methods=['PUT'])
+    def update_subnet(network):
+        """Update an existing subnet"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No JSON data provided'}), 400
+
+            new_netmask = data.get('netmask')
+            new_range_start = data.get('range_start')
+            new_range_end = data.get('range_end')
+            new_options = data.get('options')
+
+            dhcp_parser.update_subnet(network, new_netmask, new_range_start, new_range_end, new_options)
+
+            # Return the updated subnet
+            updated_subnet = dhcp_parser.get_subnet(network)
+            return jsonify(updated_subnet.to_dict())
+
+        except ValueError as e:
+            return jsonify({'error': 'Validation error', 'message': str(e)}), 400
+        except PermissionError:
+            return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to update subnet', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/subnets/<network>", methods=['DELETE'])
+    def delete_subnet(network):
+        """Delete a subnet"""
+        try:
+            dhcp_parser.delete_subnet(network)
+            return jsonify({'message': f'Subnet {network} deleted successfully'})
+
+        except ValueError as e:
+            return jsonify({'error': 'Validation error', 'message': str(e)}), 404
+        except PermissionError:
+            return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to delete subnet', 'message': str(e)}), 500
+
     return app
 
 
 def main():
     """Run the application"""
     app = create_app()
-    
+
     # Run the development server
     if app.config['DEBUG']:
         app.run(host='0.0.0.0', port=5000, debug=True)

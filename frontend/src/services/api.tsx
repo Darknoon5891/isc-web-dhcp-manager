@@ -9,6 +9,14 @@ export interface DHCPHost {
   ip: string;
 }
 
+export interface DHCPSubnet {
+  network: string;
+  netmask: string;
+  range_start?: string;
+  range_end?: string;
+  options?: { [key: string]: string };
+}
+
 export interface APIResponse<T> {
   data?: T;
   error?: string;
@@ -148,6 +156,35 @@ class APIService {
   // Backup management
   async getBackups(): Promise<BackupInfo[]> {
     return this.request<BackupInfo[]>('/backups');
+  }
+
+  // Subnet management endpoints
+  async getSubnets(): Promise<DHCPSubnet[]> {
+    return this.request<DHCPSubnet[]>('/subnets');
+  }
+
+  async getSubnet(network: string): Promise<DHCPSubnet> {
+    return this.request<DHCPSubnet>(`/subnets/${encodeURIComponent(network)}`);
+  }
+
+  async addSubnet(subnet: DHCPSubnet): Promise<DHCPSubnet> {
+    return this.request<DHCPSubnet>('/subnets', {
+      method: 'POST',
+      body: JSON.stringify(subnet),
+    });
+  }
+
+  async updateSubnet(network: string, updates: Partial<Omit<DHCPSubnet, 'network'>>): Promise<DHCPSubnet> {
+    return this.request<DHCPSubnet>(`/subnets/${encodeURIComponent(network)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteSubnet(network: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/subnets/${encodeURIComponent(network)}`, {
+      method: 'DELETE',
+    });
   }
 
   // Utility methods

@@ -104,7 +104,7 @@ openssl req -x509 -nodes -days $CERT_DAYS \
     -keyout /etc/nginx/ssl/dhcp-manager.key \
     -out /etc/nginx/ssl/dhcp-manager.crt \
     -config /tmp/openssl-san.cnf \
-    -extensions req_ext
+    -extensions req_ext 2>/dev/null
 
 # Set proper permissions
 chmod 600 /etc/nginx/ssl/dhcp-manager.key
@@ -282,6 +282,8 @@ echo "  Network: $NETWORK"
 echo "  Netmask: $NETMASK"
 echo "  Router: $ROUTER"
 echo "  DHCP Range: $RANGE_START - $RANGE_END"
+
+echo ""
 
 # Intelligent DHCP config creation - handles multiple scenarios
 mkdir -p /etc/dhcp

@@ -17,20 +17,55 @@ class DHCPHost:
         self.hostname = hostname
         self.mac = mac.upper()
         self.ip = ip
-    
+
     def to_dict(self) -> Dict[str, str]:
         return {
             'hostname': self.hostname,
             'mac': self.mac,
             'ip': self.ip
         }
-    
+
     def to_dhcp_config(self) -> str:
         """Convert to DHCP configuration format"""
         return f"""host {self.hostname} {{
     hardware ethernet {self.mac};
     fixed-address {self.ip};
 }}"""
+
+
+class DHCPSubnet:
+    """Represents a DHCP subnet declaration"""
+    def __init__(self, network: str, netmask: str, range_start: str = None,
+                 range_end: str = None, options: Dict[str, str] = None):
+        self.network = network
+        self.netmask = netmask
+        self.range_start = range_start
+        self.range_end = range_end
+        self.options = options or {}
+
+    def to_dict(self) -> Dict:
+        return {
+            'network': self.network,
+            'netmask': self.netmask,
+            'range_start': self.range_start,
+            'range_end': self.range_end,
+            'options': self.options
+        }
+
+    def to_dhcp_config(self) -> str:
+        """Convert to DHCP configuration format"""
+        lines = [f"subnet {self.network} netmask {self.netmask} {{"]
+
+        # Add range if specified
+        if self.range_start and self.range_end:
+            lines.append(f"    range {self.range_start} {self.range_end};")
+
+        # Add options
+        for key, value in sorted(self.options.items()):
+            lines.append(f"    option {key} {value};")
+
+        lines.append("}")
+        return '\n'.join(lines)
 
 
 class DHCPParser:
@@ -59,7 +94,34 @@ class DHCPParser:
         """Validate hostname format"""
         pattern = r'^[a-zA-Z0-9-_]+$'
         return bool(re.match(pattern, hostname)) and len(hostname) > 0
-    
+
+    def validate_netmask(self, netmask: str) -> bool:
+        """Validate netmask format"""
+        if not self.validate_ip_address(netmask):
+            return False
+        # Check if it's a valid netmask (contiguous 1s followed by 0s in binary)
+        try:
+            parts = [int(p) for p in netmask.split('.')]
+            binary = ''.join(format(p, '08b') for p in parts)
+            # Valid netmask: all 1s followed by all 0s
+            return binary.find('01') == -1 and '1' in binary
+        except:
+            return False
+
+    def ip_in_subnet(self, ip: str, network: str, netmask: str) -> bool:
+        """Check if an IP address is within a subnet"""
+        try:
+            ip_parts = [int(p) for p in ip.split('.')]
+            net_parts = [int(p) for p in network.split('.')]
+            mask_parts = [int(p) for p in netmask.split('.')]
+
+            for i in range(4):
+                if (ip_parts[i] & mask_parts[i]) != (net_parts[i] & mask_parts[i]):
+                    return False
+            return True
+        except:
+            return False
+
     def create_backup(self) -> str:
         """Create a backup of the current configuration"""
         if not os.path.exists(self.backup_dir):
@@ -113,7 +175,9 @@ class DHCPParser:
                     stat_info = os.stat(self.config_path)
                     os.chmod(temp_path, stat_info.st_mode)
                     try:
-                        os.chown(temp_path, stat_info.st_uid, stat_info.st_gid)
+                        # IMPORTANT: Owner must always be root (UID 0) for ISC DHCP to start
+                        # Only copy the group from the original file
+                        os.chown(temp_path, 0, stat_info.st_gid)
                     except (PermissionError, OSError):
                         # chown may fail if not running as root, that's ok
                         pass
@@ -409,6 +473,251 @@ class DHCPParser:
                 return False, "Duplicate IP addresses found in configuration"
             
             return True, "Configuration is valid"
-            
+
         except Exception as e:
             return False, f"Configuration validation error: {str(e)}"
+
+    def parse_subnets(self) -> List[DHCPSubnet]:
+        """Parse all subnet declarations from the configuration"""
+        content = self.read_config()
+        subnets = []
+
+        lines = content.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+
+            # Look for subnet declaration start
+            subnet_match = re.match(r'subnet\s+(\S+)\s+netmask\s+(\S+)\s*\{', line)
+            if subnet_match:
+                network = subnet_match.group(1)
+                netmask = subnet_match.group(2)
+                range_start = None
+                range_end = None
+                options = {}
+
+                # Parse the subnet block (limit to 200 lines)
+                block_end = min(i + 200, len(lines))
+                brace_count = 1
+                j = i + 1
+
+                while j < block_end and brace_count > 0:
+                    block_line = lines[j].strip()
+
+                    # Count braces
+                    brace_count += block_line.count('{') - block_line.count('}')
+
+                    # Extract range
+                    if not range_start:
+                        range_match = re.match(r'range\s+([0-9.]+)\s+([0-9.]+)\s*;', block_line)
+                        if range_match:
+                            range_start = range_match.group(1)
+                            range_end = range_match.group(2)
+
+                    # Extract options
+                    option_match = re.match(r'option\s+([a-z-]+)\s+(.+?)\s*;', block_line)
+                    if option_match:
+                        opt_name = option_match.group(1)
+                        opt_value = option_match.group(2)
+                        options[opt_name] = opt_value
+
+                    j += 1
+
+                    if brace_count == 0:
+                        break
+
+                subnets.append(DHCPSubnet(network, netmask, range_start, range_end, options))
+                i = j
+            else:
+                i += 1
+
+        return subnets
+
+    def get_subnet(self, network: str) -> Optional[DHCPSubnet]:
+        """Get a specific subnet by network address"""
+        subnets = self.parse_subnets()
+        for subnet in subnets:
+            if subnet.network == network:
+                return subnet
+        return None
+
+    def add_subnet(self, network: str, netmask: str, range_start: str = None,
+                   range_end: str = None, options: Dict[str, str] = None) -> bool:
+        """Add a new subnet declaration"""
+        # Validate inputs
+        if not self.validate_ip_address(network):
+            raise ValueError(f"Invalid network address: {network}")
+        if not self.validate_netmask(netmask):
+            raise ValueError(f"Invalid netmask: {netmask}")
+        if range_start and not self.validate_ip_address(range_start):
+            raise ValueError(f"Invalid range start IP: {range_start}")
+        if range_end and not self.validate_ip_address(range_end):
+            raise ValueError(f"Invalid range end IP: {range_end}")
+
+        # Validate range is within subnet
+        if range_start and not self.ip_in_subnet(range_start, network, netmask):
+            raise ValueError(f"Range start {range_start} is not in subnet {network}/{netmask}")
+        if range_end and not self.ip_in_subnet(range_end, network, netmask):
+            raise ValueError(f"Range end {range_end} is not in subnet {network}/{netmask}")
+
+        # Check if subnet already exists
+        if self.get_subnet(network):
+            raise ValueError(f"Subnet {network} already exists")
+
+        # Check for overlapping subnets
+        subnets = self.parse_subnets()
+        for subnet in subnets:
+            # Check if new subnet overlaps with existing
+            if (self.ip_in_subnet(network, subnet.network, subnet.netmask) or
+                self.ip_in_subnet(subnet.network, network, netmask)):
+                raise ValueError(f"Subnet {network}/{netmask} overlaps with existing subnet {subnet.network}/{subnet.netmask}")
+
+        # Create backup before modification
+        self.create_backup()
+
+        # Read current content
+        content = self.read_config()
+
+        # Create new subnet entry
+        new_subnet = DHCPSubnet(network, netmask, range_start, range_end, options or {})
+        subnet_config = new_subnet.to_dhcp_config()
+
+        # Find good place to insert (after global options, before hosts)
+        lines = content.split('\n')
+        insert_pos = len(lines)
+
+        # Look for first host declaration
+        for i, line in enumerate(lines):
+            if re.match(r'host\s+\S+\s*\{', line.strip()):
+                insert_pos = i
+                break
+
+        # Insert subnet before hosts or at end
+        lines.insert(insert_pos, "")
+        lines.insert(insert_pos + 1, subnet_config)
+        lines.insert(insert_pos + 2, "")
+        content = '\n'.join(lines)
+
+        # Write updated content
+        self.write_config(content)
+        return True
+
+    def update_subnet(self, network: str, new_netmask: str = None, new_range_start: str = None,
+                      new_range_end: str = None, new_options: Dict[str, str] = None) -> bool:
+        """Update an existing subnet"""
+        subnet = self.get_subnet(network)
+        if not subnet:
+            raise ValueError(f"Subnet {network} not found")
+
+        # Validate new values if provided
+        if new_netmask and not self.validate_netmask(new_netmask):
+            raise ValueError(f"Invalid netmask: {new_netmask}")
+        if new_range_start and not self.validate_ip_address(new_range_start):
+            raise ValueError(f"Invalid range start IP: {new_range_start}")
+        if new_range_end and not self.validate_ip_address(new_range_end):
+            raise ValueError(f"Invalid range end IP: {new_range_end}")
+
+        # Use current values if not updating
+        netmask = new_netmask or subnet.netmask
+        range_start = new_range_start if new_range_start is not None else subnet.range_start
+        range_end = new_range_end if new_range_end is not None else subnet.range_end
+        options = new_options if new_options is not None else subnet.options
+
+        # Validate range is within subnet
+        if range_start and not self.ip_in_subnet(range_start, network, netmask):
+            raise ValueError(f"Range start {range_start} is not in subnet {network}/{netmask}")
+        if range_end and not self.ip_in_subnet(range_end, network, netmask):
+            raise ValueError(f"Range end {range_end} is not in subnet {network}/{netmask}")
+
+        # Create backup before modification
+        self.create_backup()
+
+        # Update the subnet
+        subnet.netmask = netmask
+        subnet.range_start = range_start
+        subnet.range_end = range_end
+        subnet.options = options
+
+        # Replace in configuration
+        return self._replace_subnet_in_config(network, subnet)
+
+    def delete_subnet(self, network: str) -> bool:
+        """Delete a subnet declaration"""
+        subnet = self.get_subnet(network)
+        if not subnet:
+            raise ValueError(f"Subnet {network} not found")
+
+        # Create backup before modification
+        self.create_backup()
+
+        # Read current content
+        content = self.read_config()
+
+        # Use line-based parsing
+        lines = content.split('\n')
+        new_lines = []
+        i = 0
+        deleted = False
+
+        while i < len(lines):
+            line = lines[i]
+
+            # Check if this is the start of our target subnet
+            subnet_start = re.match(rf'subnet\s+{re.escape(network)}\s+netmask\s+\S+\s*\{{', line.strip())
+            if subnet_start and not deleted:
+                # Skip this subnet block
+                brace_count = line.count('{') - line.count('}')
+                i += 1
+
+                # Skip until we close the block
+                while i < len(lines) and brace_count > 0:
+                    brace_count += lines[i].count('{') - lines[i].count('}')
+                    i += 1
+
+                deleted = True
+            else:
+                new_lines.append(line)
+                i += 1
+
+        new_content = '\n'.join(new_lines)
+
+        # Clean up extra whitespace
+        new_content = re.sub(r'\n\s*\n\s*\n', '\n\n', new_content)
+
+        self.write_config(new_content)
+        return True
+
+    def _replace_subnet_in_config(self, network: str, new_subnet: DHCPSubnet) -> bool:
+        """Replace a subnet declaration in the configuration"""
+        content = self.read_config()
+
+        lines = content.split('\n')
+        new_lines = []
+        i = 0
+        replaced = False
+
+        while i < len(lines):
+            line = lines[i]
+
+            # Check if this is the start of our target subnet
+            subnet_start = re.match(rf'subnet\s+{re.escape(network)}\s+netmask\s+\S+\s*\{{', line.strip())
+            if subnet_start and not replaced:
+                # Skip this subnet block
+                brace_count = line.count('{') - line.count('}')
+                i += 1
+
+                # Skip until we close the block
+                while i < len(lines) and brace_count > 0:
+                    brace_count += lines[i].count('{') - lines[i].count('}')
+                    i += 1
+
+                # Insert the new subnet config
+                new_lines.append(new_subnet.to_dhcp_config())
+                replaced = True
+            else:
+                new_lines.append(line)
+                i += 1
+
+        new_content = '\n'.join(new_lines)
+        self.write_config(new_content)
+        return True
