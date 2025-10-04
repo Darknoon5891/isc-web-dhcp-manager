@@ -17,6 +17,13 @@ export interface DHCPSubnet {
   options?: { [key: string]: string };
 }
 
+export interface DHCPZone {
+  zone_name: string;
+  primary: string;
+  key_name?: string;
+  secondary?: string[];
+}
+
 export interface APIResponse<T> {
   data?: T;
   error?: string;
@@ -183,6 +190,35 @@ class APIService {
 
   async deleteSubnet(network: string): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/subnets/${encodeURIComponent(network)}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Zone management endpoints
+  async getZones(): Promise<DHCPZone[]> {
+    return this.request<DHCPZone[]>('/zones');
+  }
+
+  async getZone(zone_name: string): Promise<DHCPZone> {
+    return this.request<DHCPZone>(`/zones/${encodeURIComponent(zone_name)}`);
+  }
+
+  async addZone(zone: DHCPZone): Promise<DHCPZone> {
+    return this.request<DHCPZone>('/zones', {
+      method: 'POST',
+      body: JSON.stringify(zone),
+    });
+  }
+
+  async updateZone(zone_name: string, updates: Partial<Omit<DHCPZone, 'zone_name'>>): Promise<DHCPZone> {
+    return this.request<DHCPZone>(`/zones/${encodeURIComponent(zone_name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+  }
+
+  async deleteZone(zone_name: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>(`/zones/${encodeURIComponent(zone_name)}`, {
       method: 'DELETE',
     });
   }

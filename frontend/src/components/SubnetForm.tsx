@@ -25,6 +25,8 @@ const SubnetForm: React.FC<SubnetFormProps> = ({ editingSubnet, onSave, onCancel
   });
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [createPtrZone, setCreatePtrZone] = useState(false);
+  const [ptrPrimaryDns, setPtrPrimaryDns] = useState('');
 
   // Initialize form when editing subnet changes
   useEffect(() => {
@@ -52,7 +54,18 @@ const SubnetForm: React.FC<SubnetFormProps> = ({ editingSubnet, onSave, onCancel
       });
     }
     setErrors({});
+    setCreatePtrZone(false);
+    setPtrPrimaryDns('');
   }, [editingSubnet]);
+
+  const generateReverseZoneFromSubnet = (network: string): string => {
+    // Convert network address to reverse zone name (e.g., 192.168.1.0 -> 1.168.192.in-addr.arpa)
+    const parts = network.split('.');
+    if (parts.length < 3) {
+      return '';
+    }
+    return `${parts[2]}.${parts[1]}.${parts[0]}.in-addr.arpa`;
+  };
 
   const validateIP = (ip: string): boolean => {
     const parts = ip.split('.');
@@ -118,6 +131,15 @@ const SubnetForm: React.FC<SubnetFormProps> = ({ editingSubnet, onSave, onCancel
       }
     }
 
+    // PTR zone validation
+    if (createPtrZone && !editingSubnet) {
+      if (!ptrPrimaryDns.trim()) {
+        newErrors.ptrPrimaryDns = 'Primary DNS server is required for PTR zone creation';
+      } else if (!validateIP(ptrPrimaryDns)) {
+        newErrors.ptrPrimaryDns = 'Invalid primary DNS server IP address';
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -154,6 +176,31 @@ const SubnetForm: React.FC<SubnetFormProps> = ({ editingSubnet, onSave, onCancel
       } else {
         // Add new subnet
         await apiService.addSubnet(subnetData);
+
+        // Create PTR zone if requested
+        if (createPtrZone && ptrPrimaryDns) {
+          try {
+            const reverseZoneName = generateReverseZoneFromSubnet(formData.network);
+            if (reverseZoneName) {
+              await apiService.addZone({
+                zone_name: reverseZoneName,
+                primary: ptrPrimaryDns
+              });
+            }
+          } catch (zoneErr) {
+            // Don't fail the entire operation if zone creation fails
+            const reverseZoneName = generateReverseZoneFromSubnet(formData.network);
+            if (zoneErr instanceof APIError) {
+              setErrors({ submit: `Subnet created successfully, but PTR zone creation failed: ${zoneErr.message}. You can manually create zone "${reverseZoneName}" in the PTR Zones tab.` });
+              setLoading(false);
+              return;
+            } else {
+              setErrors({ submit: `Subnet created successfully, but PTR zone "${reverseZoneName}" creation failed. You can manually create it in the PTR Zones tab.` });
+              setLoading(false);
+              return;
+            }
+          }
+        }
       }
 
       onSave();
@@ -310,9 +357,65 @@ const SubnetForm: React.FC<SubnetFormProps> = ({ editingSubnet, onSave, onCancel
           {errors.domainNameServers && <span className="error-message">{errors.domainNameServers}</span>}
         </div>
 
+        {/* PTR Zone Auto-Creation Section */}
+        {!editingSubnet && (
+          <div style={{
+            backgroundColor: '#e3f2fd',
+            padding: '20px',
+            borderRadius: '4px',
+            marginTop: '30px',
+            border: '1px solid #90caf9'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
+              <input
+                id="createPtrZone"
+                type="checkbox"
+                checked={createPtrZone}
+                onChange={(e) => setCreatePtrZone(e.target.checked)}
+                style={{ marginRight: '10px', width: 'auto' }}
+              />
+              <label htmlFor="createPtrZone" style={{ fontWeight: 'bold', margin: 0, cursor: 'pointer' }}>
+                Auto-create PTR Zone for this subnet
+              </label>
+            </div>
+
+            {createPtrZone && (
+              <div className="form-group" style={{ marginBottom: '10px' }}>
+                <label htmlFor="ptrPrimaryDns">
+                  Primary DNS Server for PTR Zone <span style={{ color: '#e74c3c' }}>*</span>
+                </label>
+                <input
+                  id="ptrPrimaryDns"
+                  type="text"
+                  value={ptrPrimaryDns}
+                  onChange={(e) => {
+                    setPtrPrimaryDns(e.target.value);
+                    if (errors.ptrPrimaryDns) {
+                      setErrors({ ...errors, ptrPrimaryDns: '' });
+                    }
+                  }}
+                  placeholder="192.168.1.1"
+                  className={errors.ptrPrimaryDns ? 'error' : ''}
+                />
+                {errors.ptrPrimaryDns && <span className="error-message">{errors.ptrPrimaryDns}</span>}
+                <small style={{ color: '#1565c0', display: 'block', marginTop: '5px' }}>
+                  This will create a reverse DNS zone: <strong>{formData.network ? generateReverseZoneFromSubnet(formData.network) : '(enter network first)'}</strong>
+                </small>
+              </div>
+            )}
+
+            <small style={{ color: '#1565c0', display: 'block' }}>
+              {createPtrZone
+                ? 'A PTR zone will be automatically created for reverse DNS lookups when you save this subnet.'
+                : 'Enable this option to automatically create a corresponding PTR zone for reverse DNS lookups.'
+              }
+            </small>
+          </div>
+        )}
+
         <div className="form-actions" style={{ marginTop: '30px', display: 'flex', gap: '10px' }}>
           <button type="submit" className="btn btn-success" disabled={loading}>
-            {loading ? 'Saving...' : editingSubnet ? 'Update Subnet' : 'Add Subnet'}
+            {loading ? (createPtrZone && !editingSubnet ? 'Saving subnet and creating PTR zone...' : 'Saving...') : editingSubnet ? 'Update Subnet' : 'Add Subnet'}
           </button>
           <button type="button" className="btn" onClick={onCancel} disabled={loading}>
             Cancel

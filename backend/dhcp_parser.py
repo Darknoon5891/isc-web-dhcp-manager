@@ -68,6 +68,43 @@ class DHCPSubnet:
         return '\n'.join(lines)
 
 
+class DHCPZone:
+    """Represents a DHCP zone declaration for DNS updates"""
+    def __init__(self, zone_name: str, primary: str, key_name: str = None, secondary: List[str] = None):
+        self.zone_name = zone_name
+        self.primary = primary
+        self.key_name = key_name
+        self.secondary = secondary or []
+
+    def to_dict(self) -> Dict:
+        return {
+            'zone_name': self.zone_name,
+            'primary': self.primary,
+            'key_name': self.key_name,
+            'secondary': self.secondary
+        }
+
+    def to_dhcp_config(self) -> str:
+        """Convert to DHCP configuration format"""
+        # Zone names must end with a dot in DHCP config
+        zone_name_with_dot = self.zone_name if self.zone_name.endswith('.') else f"{self.zone_name}."
+        lines = [f'zone "{zone_name_with_dot}" {{']
+
+        # Add primary server
+        lines.append(f"    primary {self.primary};")
+
+        # Add key if specified
+        if self.key_name:
+            lines.append(f"    key {self.key_name};")
+
+        # Add secondary servers if specified
+        for sec in self.secondary:
+            lines.append(f"    secondary {sec};")
+
+        lines.append("}")
+        return '\n'.join(lines)
+
+
 class DHCPParser:
     """Parser for ISC DHCP Server configuration files"""
     
@@ -121,6 +158,16 @@ class DHCPParser:
             return True
         except:
             return False
+
+    def validate_zone_name(self, zone_name: str) -> bool:
+        """Validate zone name format"""
+        if not zone_name or len(zone_name) < 3:
+            return False
+        # Remove trailing dot if present for validation
+        name = zone_name.rstrip('.')
+        # Check for valid characters and structure
+        pattern = r'^[a-zA-Z0-9.-]+$'
+        return bool(re.match(pattern, name))
 
     def create_backup(self) -> str:
         """Create a backup of the current configuration"""
@@ -720,4 +767,244 @@ class DHCPParser:
 
         new_content = '\n'.join(new_lines)
         self.write_config(new_content)
+        return True
+
+    def parse_zones(self) -> List[DHCPZone]:
+        """Parse all zone declarations from the configuration"""
+        content = self.read_config()
+        zones = []
+
+        lines = content.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+
+            # Look for zone declaration start: zone "name" {
+            zone_match = re.match(r'zone\s+"([^"]+)"\s*\{', line)
+            if zone_match:
+                zone_name = zone_match.group(1).rstrip('.')  # Remove trailing dot for storage
+                primary = None
+                key_name = None
+                secondary = []
+
+                # Parse the zone block (limit to 50 lines)
+                block_end = min(i + 50, len(lines))
+                brace_count = 1
+                j = i + 1
+
+                while j < block_end and brace_count > 0:
+                    block_line = lines[j].strip()
+
+                    # Count braces
+                    brace_count += block_line.count('{') - block_line.count('}')
+
+                    # Extract primary server
+                    if not primary:
+                        primary_match = re.match(r'primary\s+([0-9.]+)\s*;', block_line)
+                        if primary_match:
+                            primary = primary_match.group(1)
+
+                    # Extract key
+                    if not key_name:
+                        key_match = re.match(r'key\s+([a-zA-Z0-9_-]+)\s*;', block_line)
+                        if key_match:
+                            key_name = key_match.group(1)
+
+                    # Extract secondary servers
+                    sec_match = re.match(r'secondary\s+([0-9.]+)\s*;', block_line)
+                    if sec_match:
+                        secondary.append(sec_match.group(1))
+
+                    j += 1
+
+                    if brace_count == 0:
+                        break
+
+                # Only add zones with at least a primary server
+                if primary:
+                    zones.append(DHCPZone(zone_name, primary, key_name, secondary))
+
+                i = j
+            else:
+                i += 1
+
+        return zones
+
+    def get_zone(self, zone_name: str) -> Optional[DHCPZone]:
+        """Get a specific zone by name"""
+        # Normalize zone name (remove trailing dot for comparison)
+        zone_name = zone_name.rstrip('.')
+        zones = self.parse_zones()
+        for zone in zones:
+            if zone.zone_name.rstrip('.') == zone_name:
+                return zone
+        return None
+
+    def add_zone(self, zone_name: str, primary: str, key_name: str = None, secondary: List[str] = None) -> bool:
+        """Add a new zone declaration"""
+        # Validate inputs
+        if not self.validate_zone_name(zone_name):
+            raise ValueError(f"Invalid zone name: {zone_name}")
+        if not self.validate_ip_address(primary):
+            raise ValueError(f"Invalid primary server IP: {primary}")
+        if secondary:
+            for sec in secondary:
+                if not self.validate_ip_address(sec):
+                    raise ValueError(f"Invalid secondary server IP: {sec}")
+
+        # Check if zone already exists
+        if self.get_zone(zone_name):
+            raise ValueError(f"Zone {zone_name} already exists")
+
+        # Create backup before modification
+        self.create_backup()
+
+        # Read current content
+        content = self.read_config()
+
+        # Create new zone entry
+        new_zone = DHCPZone(zone_name, primary, key_name, secondary or [])
+        zone_config = new_zone.to_dhcp_config()
+
+        # Find good place to insert (at end before hosts)
+        lines = content.split('\n')
+        insert_pos = len(lines)
+
+        # Look for first host or subnet declaration
+        for i, line in enumerate(lines):
+            if (re.match(r'host\s+\S+\s*\{', line.strip()) or
+                re.match(r'subnet\s+\S+\s+netmask\s+\S+\s*\{', line.strip())):
+                insert_pos = i
+                break
+
+        # Insert zone
+        lines.insert(insert_pos, "")
+        lines.insert(insert_pos + 1, zone_config)
+        lines.insert(insert_pos + 2, "")
+        content = '\n'.join(lines)
+
+        # Write updated content
+        self.write_config(content)
+        return True
+
+    def update_zone(self, zone_name: str, new_primary: str = None, new_key_name: str = None,
+                    new_secondary: List[str] = None) -> bool:
+        """Update an existing zone"""
+        zone = self.get_zone(zone_name)
+        if not zone:
+            raise ValueError(f"Zone {zone_name} not found")
+
+        # Validate new values if provided
+        if new_primary and not self.validate_ip_address(new_primary):
+            raise ValueError(f"Invalid primary server IP: {new_primary}")
+        if new_secondary:
+            for sec in new_secondary:
+                if not self.validate_ip_address(sec):
+                    raise ValueError(f"Invalid secondary server IP: {sec}")
+
+        # Use current values if not updating
+        primary = new_primary or zone.primary
+        key_name = new_key_name if new_key_name is not None else zone.key_name
+        secondary = new_secondary if new_secondary is not None else zone.secondary
+
+        # Create backup before modification
+        self.create_backup()
+
+        # Update the zone
+        zone.primary = primary
+        zone.key_name = key_name
+        zone.secondary = secondary
+
+        # Replace in configuration
+        return self._replace_zone_in_config(zone_name, zone)
+
+    def delete_zone(self, zone_name: str) -> bool:
+        """Delete a zone declaration"""
+        zone = self.get_zone(zone_name)
+        if not zone:
+            raise ValueError(f"Zone {zone_name} not found")
+
+        # Create backup before modification
+        self.create_backup()
+
+        # Read current content
+        content = self.read_config()
+
+        # Use line-based parsing
+        lines = content.split('\n')
+        new_lines = []
+        i = 0
+        deleted = False
+
+        while i < len(lines):
+            line = lines[i]
+
+            # Check if this is the start of our target zone
+            zone_start = re.match(rf'zone\s+"([^"]+)"\s*\{{', line.strip())
+            if zone_start and not deleted:
+                found_zone = zone_start.group(1).rstrip('.')
+                if found_zone == zone_name.rstrip('.'):
+                    # Skip this zone block
+                    brace_count = line.count('{') - line.count('}')
+                    i += 1
+
+                    # Skip until we close the block
+                    while i < len(lines) and brace_count > 0:
+                        brace_count += lines[i].count('{') - lines[i].count('}')
+                        i += 1
+
+                    deleted = True
+                else:
+                    new_lines.append(line)
+                    i += 1
+            else:
+                new_lines.append(line)
+                i += 1
+
+        new_content_zones = '\n'.join(new_lines)
+
+        # Clean up extra whitespace
+        new_content_zones = re.sub(r'\n\s*\n\s*\n', '\n\n', new_content_zones)
+
+        self.write_config(new_content_zones)
+        return True
+
+    def _replace_zone_in_config(self, zone_name: str, new_zone: DHCPZone) -> bool:
+        """Replace a zone declaration in the configuration"""
+        content = self.read_config()
+
+        lines = content.split('\n')
+        new_lines = []
+        i = 0
+        replaced = False
+
+        while i < len(lines):
+            line = lines[i]
+
+            # Check if this is the start of our target zone
+            zone_start = re.match(rf'zone\s+"([^"]+)"\s*\{{', line.strip())
+            if zone_start and not replaced:
+                found_zone = zone_start.group(1).rstrip('.')
+                if found_zone == zone_name.rstrip('.'):
+                    # Skip this zone block
+                    brace_count = line.count('{') - line.count('}')
+                    i += 1
+
+                    # Skip until we close the block
+                    while i < len(lines) and brace_count > 0:
+                        brace_count += lines[i].count('{') - lines[i].count('}')
+                        i += 1
+
+                    # Insert the new zone config
+                    new_lines.append(new_zone.to_dhcp_config())
+                    replaced = True
+                else:
+                    new_lines.append(line)
+                    i += 1
+            else:
+                new_lines.append(line)
+                i += 1
+
+        new_content_final = '\n'.join(new_lines)
+        self.write_config(new_content_final)
         return True

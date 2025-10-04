@@ -7,7 +7,7 @@ import os
 import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet
+from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone
 from config import get_config, create_test_config
 
 
@@ -418,6 +418,99 @@ def create_app():
             return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
         except Exception as e:
             return jsonify({'error': 'Failed to delete subnet', 'message': str(e)}), 500
+
+    # Zone management endpoints
+    @app.route(f"{app.config['API_PREFIX']}/zones", methods=['GET'])
+    def get_zones():
+        """Get all zone declarations"""
+        try:
+            zones = dhcp_parser.parse_zones()
+            return jsonify([zone.to_dict() for zone in zones])
+        except PermissionError:
+            return jsonify({'error': 'Permission denied accessing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to read zones', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/zones/<zone_name>", methods=['GET'])
+    def get_zone(zone_name):
+        """Get a specific zone"""
+        try:
+            zone = dhcp_parser.get_zone(zone_name)
+            if zone:
+                return jsonify(zone.to_dict())
+            return jsonify({'error': 'Zone not found'}), 404
+        except PermissionError:
+            return jsonify({'error': 'Permission denied accessing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to read zone', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/zones", methods=['POST'])
+    def add_zone():
+        """Add a new zone"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No JSON data provided'}), 400
+
+            zone_name = data.get('zone_name')
+            primary = data.get('primary')
+            key_name = data.get('key_name')
+            secondary = data.get('secondary', [])
+
+            if not all([zone_name, primary]):
+                return jsonify({'error': 'zone_name and primary are required'}), 400
+
+            dhcp_parser.add_zone(zone_name, primary, key_name, secondary)
+
+            # Return the created zone
+            new_zone = dhcp_parser.get_zone(zone_name)
+            return jsonify(new_zone.to_dict()), 201
+
+        except ValueError as e:
+            return jsonify({'error': 'Validation error', 'message': str(e)}), 400
+        except PermissionError:
+            return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to add zone', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/zones/<zone_name>", methods=['PUT'])
+    def update_zone(zone_name):
+        """Update an existing zone"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No JSON data provided'}), 400
+
+            new_primary = data.get('primary')
+            new_key_name = data.get('key_name')
+            new_secondary = data.get('secondary')
+
+            dhcp_parser.update_zone(zone_name, new_primary, new_key_name, new_secondary)
+
+            # Return the updated zone
+            updated_zone = dhcp_parser.get_zone(zone_name)
+            return jsonify(updated_zone.to_dict())
+
+        except ValueError as e:
+            return jsonify({'error': 'Validation error', 'message': str(e)}), 400
+        except PermissionError:
+            return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to update zone', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/zones/<zone_name>", methods=['DELETE'])
+    def delete_zone(zone_name):
+        """Delete a zone"""
+        try:
+            dhcp_parser.delete_zone(zone_name)
+            return jsonify({'message': f'Zone {zone_name} deleted successfully'})
+
+        except ValueError as e:
+            return jsonify({'error': 'Validation error', 'message': str(e)}), 404
+        except PermissionError:
+            return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to delete zone', 'message': str(e)}), 500
 
     return app
 

@@ -222,6 +222,7 @@ node_modules/**
 
 # DEV
 claude.md
+.claude/**
 
 # Development test files
 test_dhcpd.conf

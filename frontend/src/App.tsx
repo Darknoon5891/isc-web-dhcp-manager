@@ -8,15 +8,23 @@ import HostList from "./components/HostList";
 import HostForm from "./components/HostForm";
 import SubnetList from "./components/SubnetList";
 import SubnetForm from "./components/SubnetForm";
+import ZoneList from "./components/ZoneList";
+import ZoneForm from "./components/ZoneForm";
 import ConfigViewer from "./components/ConfigViewer";
-import apiService, { DHCPHost, DHCPSubnet, APIError } from "./services/api";
+import apiService, {
+  DHCPHost,
+  DHCPSubnet,
+  DHCPZone,
+  APIError,
+} from "./services/api";
 
-type ActiveTab = "hosts" | "subnets" | "config";
+type ActiveTab = "hosts" | "subnets" | "zones" | "config";
 
 function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("hosts");
   const [editingHost, setEditingHost] = useState<DHCPHost | null>(null);
   const [editingSubnet, setEditingSubnet] = useState<DHCPSubnet | null>(null);
+  const [editingZone, setEditingZone] = useState<DHCPZone | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [appStatus, setAppStatus] = useState<{
@@ -56,6 +64,7 @@ function App() {
     // Close any open forms when switching tabs
     setEditingHost(null);
     setEditingSubnet(null);
+    setEditingZone(null);
     setShowAddForm(false);
   };
 
@@ -79,9 +88,20 @@ function App() {
     setShowAddForm(true);
   };
 
+  const handleAddZone = () => {
+    setEditingZone(null);
+    setShowAddForm(true);
+  };
+
+  const handleEditZone = (zone: DHCPZone) => {
+    setEditingZone(zone);
+    setShowAddForm(true);
+  };
+
   const handleFormSave = () => {
     setEditingHost(null);
     setEditingSubnet(null);
+    setEditingZone(null);
     setShowAddForm(false);
     triggerRefresh();
   };
@@ -89,6 +109,7 @@ function App() {
   const handleFormCancel = () => {
     setEditingHost(null);
     setEditingSubnet(null);
+    setEditingZone(null);
     setShowAddForm(false);
   };
 
@@ -96,7 +117,11 @@ function App() {
     setRefreshTrigger((prev) => prev + 1);
   };
 
-  const isFormVisible = showAddForm || editingHost !== null || editingSubnet !== null;
+  const isFormVisible =
+    showAddForm ||
+    editingHost !== null ||
+    editingSubnet !== null ||
+    editingZone !== null;
 
   return (
     <div>
@@ -133,6 +158,12 @@ function App() {
             onClick={() => handleTabChange("subnets")}
           >
             Subnets
+          </button>
+          <button
+            className={`tab ${activeTab === "zones" ? "active" : ""}`}
+            onClick={() => handleTabChange("zones")}
+          >
+            PTR Zones
           </button>
           <button
             className={`tab ${activeTab === "config" ? "active" : ""}`}
@@ -209,6 +240,42 @@ function App() {
           </div>
         )}
 
+        {activeTab === "zones" && (
+          <div>
+            {!isFormVisible && (
+              <div style={{ marginBottom: "20px" }}>
+                <button
+                  className="btn btn-success"
+                  onClick={handleAddZone}
+                  disabled={!appStatus.connected}
+                >
+                  Add PTR Zone
+                </button>
+              </div>
+            )}
+
+            {isFormVisible && editingZone !== null ? (
+              <ZoneForm
+                editingZone={editingZone}
+                onSave={handleFormSave}
+                onCancel={handleFormCancel}
+              />
+            ) : isFormVisible && !editingHost && !editingSubnet ? (
+              <ZoneForm
+                editingZone={null}
+                onSave={handleFormSave}
+                onCancel={handleFormCancel}
+              />
+            ) : (
+              <ZoneList
+                onEditZone={handleEditZone}
+                onRefresh={triggerRefresh}
+                refreshTrigger={refreshTrigger}
+              />
+            )}
+          </div>
+        )}
+
         {activeTab === "config" && (
           <ConfigViewer refreshTrigger={refreshTrigger} />
         )}
@@ -229,7 +296,7 @@ function App() {
             DHCP Server configuration
           </p>
           <p>
-            <strong>⚠️ Important:</strong> Always validate configuration before
+            <strong>Important:</strong> Always validate configuration before
             restarting the DHCP service. Invalid configurations may cause
             service failures.
           </p>
