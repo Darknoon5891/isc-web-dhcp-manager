@@ -26,12 +26,21 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(
     null
   );
+  const [backendServiceStatus, setBackendServiceStatus] =
+    useState<ServiceStatus | null>(null);
   const [validation, setValidation] = useState<ConfigValidation | null>(null);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [validating, setValidating] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [restartingBackend, setRestartingBackend] = useState(false);
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
+  const [showBackendRestartConfirm, setShowBackendRestartConfirm] =
+    useState(false);
   const [restartMessage, setRestartMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [backendRestartMessage, setBackendRestartMessage] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
@@ -55,11 +64,19 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
 
   const loadServiceStatus = async () => {
     try {
-      const status = await apiService.getServiceStatus();
+      const status = await apiService.getServiceStatus("isc-dhcp-server");
       setServiceStatus(status);
     } catch (err) {
-      console.warn("Failed to load service status:", err);
-      // Don't show error for service status as it might not be available in dev mode
+      console.warn("Failed to load DHCP service status:", err);
+    }
+  };
+
+  const loadBackendServiceStatus = async () => {
+    try {
+      const status = await apiService.getServiceStatus("dhcp-manager");
+      setBackendServiceStatus(status);
+    } catch (err) {
+      console.warn("Failed to load backend service status:", err);
     }
   };
 
@@ -74,10 +91,9 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
 
   useEffect(() => {
     if (showOnlyServiceStatus) {
-      // Only load service status for the Service Configuration tab
       loadServiceStatus();
+      loadBackendServiceStatus();
     } else {
-      // Load everything for the Global Configuration tab
       loadConfig();
       loadServiceStatus();
       loadBackups();
@@ -115,8 +131,8 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
     try {
       setRestarting(true);
       setShowRestartConfirm(false);
-      const result = await apiService.restartService();
-      await loadServiceStatus(); // Refresh service status
+      const result = await apiService.restartService("isc-dhcp-server");
+      await loadServiceStatus();
       setRestartMessage({
         type: "success",
         text: result.message || "DHCP service restarted successfully!",
@@ -142,6 +158,42 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
     setShowRestartConfirm(false);
   };
 
+  const handleBackendRestartClick = () => {
+    setShowBackendRestartConfirm(true);
+    setBackendRestartMessage(null);
+  };
+
+  const handleBackendRestartConfirm = async () => {
+    try {
+      setRestartingBackend(true);
+      setShowBackendRestartConfirm(false);
+      const result = await apiService.restartService("dhcp-manager");
+      await loadBackendServiceStatus();
+      setBackendRestartMessage({
+        type: "success",
+        text: result.message || "Backend service restarted successfully!",
+      });
+    } catch (err) {
+      if (err instanceof APIError) {
+        setBackendRestartMessage({
+          type: "error",
+          text: err.message,
+        });
+      } else {
+        setBackendRestartMessage({
+          type: "error",
+          text: "Failed to restart backend service. Please try again.",
+        });
+      }
+    } finally {
+      setRestartingBackend(false);
+    }
+  };
+
+  const handleBackendRestartCancel = () => {
+    setShowBackendRestartConfirm(false);
+  };
+
   const formatTimestamp = (timestamp: number): string => {
     return new Date(timestamp * 1000).toLocaleString();
   };
@@ -160,11 +212,10 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
     );
   }
 
-  // If showOnlyServiceStatus is true, only show service status
   if (showOnlyServiceStatus) {
     return (
       <div>
-        {/* Restart Confirmation Modal */}
+        {/* DHCP Service Restart Confirmation Modal */}
         {showRestartConfirm && (
           <div
             style={{
@@ -191,7 +242,7 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
               }}
             >
               <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
-                Confirm Service Restart
+                Confirm DHCP Service Restart
               </h3>
               <p style={{ marginBottom: "20px", color: "#666" }}>
                 Are you sure you want to restart the DHCP service? This may
@@ -214,6 +265,65 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
                 <button
                   className="btn"
                   onClick={handleRestartConfirm}
+                  style={{ background: "#e74c3c" }}
+                >
+                  Restart Service
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Backend Service Restart Confirmation Modal */}
+        {showBackendRestartConfirm && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: "white",
+                padding: "30px",
+                borderRadius: "8px",
+                maxWidth: "500px",
+                width: "90%",
+                boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+              }}
+            >
+              <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
+                Confirm Backend Service Restart
+              </h3>
+              <p style={{ marginBottom: "20px", color: "#666" }}>
+                Are you sure you want to restart the backend service? This will
+                temporarily disconnect the web interface.
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  className="btn"
+                  onClick={handleBackendRestartCancel}
+                  style={{ background: "#95a5a6" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn"
+                  onClick={handleBackendRestartConfirm}
                   style={{ background: "#e74c3c" }}
                 >
                   Restart Service
@@ -296,6 +406,85 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
                   }}
                 >
                   {serviceStatus.details}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* Backend Service Status Card */}
+        {backendServiceStatus && (
+          <div className="card">
+            <h3>DHCP Manager Service Status</h3>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "15px",
+                marginBottom: "15px",
+              }}
+            >
+              <div>
+                <strong>Service:</strong> {backendServiceStatus.service}
+              </div>
+              <div>
+                <strong>Status:</strong>{" "}
+                <span
+                  style={{
+                    color: backendServiceStatus.active ? "#27ae60" : "#e74c3c",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {backendServiceStatus.status}
+                </span>
+              </div>
+              <button
+                className="btn"
+                onClick={handleBackendRestartClick}
+                disabled={restartingBackend}
+              >
+                {restartingBackend ? "Restarting..." : "Restart Service"}
+              </button>
+            </div>
+
+            {backendRestartMessage && (
+              <div
+                className={`alert ${
+                  backendRestartMessage.type === "success"
+                    ? "alert-success"
+                    : "alert-error"
+                }`}
+                style={{ marginTop: "15px" }}
+              >
+                <pre
+                  style={{
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    fontFamily: "inherit",
+                    fontSize: "inherit",
+                  }}
+                >
+                  {backendRestartMessage.text}
+                </pre>
+              </div>
+            )}
+
+            {backendServiceStatus.details && (
+              <details>
+                <summary style={{ cursor: "pointer", marginBottom: "10px" }}>
+                  View Service Details
+                </summary>
+                <pre
+                  style={{
+                    background: "#f8f9fa",
+                    padding: "10px",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    overflow: "auto",
+                    maxHeight: "200px",
+                  }}
+                >
+                  {backendServiceStatus.details}
                 </pre>
               </details>
             )}

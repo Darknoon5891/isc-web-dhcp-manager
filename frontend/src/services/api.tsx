@@ -171,12 +171,12 @@ class APIService {
   }
 
   // Service management
-  async getServiceStatus(): Promise<ServiceStatus> {
-    return this.request<ServiceStatus>("/service/status");
+  async getServiceStatus(serviceName: string = "isc-dhcp-server"): Promise<ServiceStatus> {
+    return this.request<ServiceStatus>(`/service/status/${serviceName}`);
   }
 
-  async restartService(): Promise<{ message: string; status: string }> {
-    return this.request<{ message: string; status: string }>("/restart", {
+  async restartService(serviceName: string = "isc-dhcp-server"): Promise<{ message: string; status: string }> {
+    return this.request<{ message: string; status: string }>(`/restart/${serviceName}`, {
       method: "POST",
     });
   }

@@ -181,27 +181,49 @@ def create_app():
         except Exception as e:
             return jsonify({'error': 'Failed to validate configuration', 'message': str(e)}), 500
     
-    @app.route(f"{app.config['API_PREFIX']}/restart", methods=['POST'])
-    def restart_dhcp_service():
-        """Restart the DHCP service"""
+    @app.route(f"{app.config['API_PREFIX']}/restart/<service_name>", methods=['POST'])
+    def restart_service(service_name):
+        """Restart a service (DHCP or backend)"""
         if not app.config['ALLOW_SERVICE_RESTART']:
             return jsonify({'error': 'Service restart is disabled'}), 403
-        
+
         try:
-            # First validate the configuration
-            is_valid, validation_message = dhcp_parser.validate_config()
-            if not is_valid:
+            # Validate service name - only allow these two services
+            allowed_services = ['isc-dhcp-server', 'dhcp-manager']
+            if service_name not in allowed_services:
                 return jsonify({
-                    'error': 'Configuration validation failed',
-                    'message': validation_message
+                    'error': 'Invalid service name',
+                    'message': f'Service must be one of: {", ".join(allowed_services)}'
                 }), 400
-            
-            # Restart the service
-            service_name = app.config['DHCP_SERVICE_NAME']
-            
-            # Use systemctl to restart the service (requires sudo)
+
+            full_service_name = f'{service_name}.service' if not service_name.endswith('.service') else service_name
+
+            # Only validate DHCP config before restarting DHCP service
+            if service_name == 'isc-dhcp-server':
+                is_valid, validation_message = dhcp_parser.validate_config()
+                if not is_valid:
+                    return jsonify({
+                        'error': 'Configuration validation failed',
+                        'message': validation_message
+                    }), 400
+
+            # Special handling for backend service restart
+            if service_name == 'dhcp-manager':
+                # For backend service, initiate restart asynchronously and return immediately
+                # We can't wait for response because the service will kill itself
+                subprocess.Popen(
+                    ['/usr/bin/sudo', '/bin/systemctl', 'restart', full_service_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+                return jsonify({
+                    'message': f'Service {full_service_name} restart initiated successfully',
+                    'status': 'restarting'
+                })
+
+            # For DHCP service, use synchronous restart with status checking
             result = subprocess.run(
-                ['/usr/bin/sudo', '/bin/systemctl', 'restart', service_name],
+                ['/usr/bin/sudo', '/bin/systemctl', 'restart', full_service_name],
                 capture_output=True,
                 text=True,
                 timeout=30
@@ -211,7 +233,7 @@ def create_app():
                 # Check if service is running
                 # Note: is-active returns non-zero if service is not active - this is normal
                 status_result = subprocess.run(
-                    ['/bin/systemctl', 'is-active', service_name],
+                    ['/bin/systemctl', 'is-active', full_service_name],
                     capture_output=True,
                     text=True
                 )
@@ -220,7 +242,7 @@ def create_app():
 
                 if service_status == 'active':
                     return jsonify({
-                        'message': f'DHCP service {service_name} restarted successfully',
+                        'message': f'Service {full_service_name} restarted successfully',
                         'status': 'active'
                     })
                 else:
@@ -233,7 +255,7 @@ def create_app():
                         'status': service_status
                     }), 500
             else:
-                error_msg = result.stderr.strip() if result.stderr else f'Failed to restart DHCP service {service_name}'
+                error_msg = result.stderr.strip() if result.stderr else f'Failed to restart service {full_service_name}'
                 return jsonify({
                     'error': error_msg,
                     'message': error_msg
@@ -248,16 +270,24 @@ def create_app():
         except Exception as e:
             return jsonify({'error': 'Failed to restart service', 'message': str(e)}), 500
     
-    @app.route(f"{app.config['API_PREFIX']}/service/status", methods=['GET'])
-    def get_service_status():
-        """Get the current status of the DHCP service"""
+    @app.route(f"{app.config['API_PREFIX']}/service/status/<service_name>", methods=['GET'])
+    def get_service_status(service_name):
+        """Get the current status of a service (DHCP or backend)"""
         try:
-            service_name = app.config['DHCP_SERVICE_NAME']
+            # Validate service name - only allow these two services
+            allowed_services = ['isc-dhcp-server', 'dhcp-manager']
+            if service_name not in allowed_services:
+                return jsonify({
+                    'error': 'Invalid service name',
+                    'message': f'Service must be one of: {", ".join(allowed_services)}'
+                }), 400
+
+            full_service_name = f'{service_name}.service' if not service_name.endswith('.service') else service_name
 
             # Get service status (polkit handles authentication)
             # Note: is-active returns non-zero if service is not active - this is normal
             result = subprocess.run(
-                ['/bin/systemctl', 'is-active', service_name],
+                ['/bin/systemctl', 'is-active', full_service_name],
                 capture_output=True,
                 text=True
             )
@@ -267,13 +297,13 @@ def create_app():
             # Get more detailed status
             # Note: status returns non-zero if service is not active - this is normal
             detail_result = subprocess.run(
-                ['/bin/systemctl', 'status', service_name, '--no-pager', '-l'],
+                ['/bin/systemctl', 'status', full_service_name, '--no-pager', '-l'],
                 capture_output=True,
                 text=True
             )
 
             return jsonify({
-                'service': service_name,
+                'service': full_service_name,
                 'status': status,
                 'active': status == 'active',
                 'details': detail_result.stdout

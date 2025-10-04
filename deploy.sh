@@ -476,7 +476,7 @@ chmod 660 /etc/dhcp/dhcpd.conf
 chown root:"$BACKEND_USER" /etc/dhcp
 chmod 775 /etc/dhcp
 
-# Allow backend user to restart DHCP service via sudoers
+# Allow backend user to restart DHCP service and backend service via sudoers
 cat > /etc/sudoers.d/dhcp-manager <<EOF
 $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart isc-dhcp-server.service
 $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl status isc-dhcp-server.service
@@ -484,19 +484,22 @@ $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active isc-dhcp-server.servi
 $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart isc-dhcp-server
 $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl status isc-dhcp-server
 $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active isc-dhcp-server
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart dhcp-manager.service
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl status dhcp-manager.service
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active dhcp-manager.service
 $BACKEND_USER ALL=(ALL) NOPASSWD: /usr/sbin/dhcpd -t -cf /etc/dhcp/dhcpd.conf
 EOF
 chmod 440 /etc/sudoers.d/dhcp-manager
 
-# Create polkit rule to allow dhcp-manager to control isc-dhcp-server without authentication
+# Create polkit rule to allow dhcp-manager to control isc-dhcp-server and dhcp-manager services without authentication
 mkdir -p /etc/polkit-1/rules.d
 cat > /etc/polkit-1/rules.d/50-dhcp-manager.rules <<'POLKITEOF'
-/* Allow dhcp-manager user to manage isc-dhcp-server service */
+/* Allow dhcp-manager user to manage isc-dhcp-server and dhcp-manager services */
 polkit.addRule(function(action, subject) {
     if (action.id == "org.freedesktop.systemd1.manage-units" &&
         subject.user == "dhcp-manager") {
         var unit = action.lookup("unit");
-        if (unit == "isc-dhcp-server.service") {
+        if (unit == "isc-dhcp-server.service" || unit == "dhcp-manager.service") {
             return polkit.Result.YES;
         }
     }
