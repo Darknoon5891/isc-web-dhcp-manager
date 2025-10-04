@@ -6,10 +6,65 @@ Provides REST API for managing ISC DHCP Server configuration
 import os
 import subprocess
 import socket
+import logging
+from logging.handlers import RotatingFileHandler
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone, DHCPGlobalConfig
 from config_manager import ConfigManager
+
+
+def setup_logging(app):
+    """Configure application logging"""
+    # Get logging configuration
+    log_level = app.config.get('LOG_LEVEL', 'INFO').upper()
+    log_path = app.config.get('LOGGING_PATH', '/var/log/isc-web-dhcp-manager')
+
+    # Convert log level string to logging constant
+    numeric_level = getattr(logging, log_level, logging.INFO)
+
+    # Create log directory if it doesn't exist
+    if not os.path.exists(log_path):
+        try:
+            os.makedirs(log_path, exist_ok=True)
+        except PermissionError:
+            # Fall back to current directory if we can't create log directory
+            log_path = '.'
+
+    # Define log format
+    log_format = logging.Formatter(
+        '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # Create rotating file handler (10MB max, keep 5 backups)
+    log_file = os.path.join(log_path, 'dhcp-manager.log')
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=5
+    )
+    file_handler.setLevel(numeric_level)
+    file_handler.setFormatter(log_format)
+
+    # Create console handler for systemd journal
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(numeric_level)
+    console_handler.setFormatter(log_format)
+
+    # Configure Flask app logger
+    app.logger.setLevel(numeric_level)
+    app.logger.addHandler(file_handler)
+    app.logger.addHandler(console_handler)
+
+    # Configure werkzeug logger (Flask's HTTP server)
+    werkzeug_logger = logging.getLogger('werkzeug')
+    werkzeug_logger.setLevel(numeric_level)
+    werkzeug_logger.addHandler(file_handler)
+    werkzeug_logger.addHandler(console_handler)
+
+    # Set root logger level
+    logging.getLogger().setLevel(numeric_level)
 
 
 def create_app():
@@ -52,6 +107,9 @@ def create_app():
 
     # Initialize CORS
     CORS(app, origins=app.config['CORS_ORIGINS'])
+
+    # Setup logging
+    setup_logging(app)
 
     # Initialize DHCP parser
     dhcp_parser = DHCPParser(app.config['DHCP_CONFIG_PATH'])
