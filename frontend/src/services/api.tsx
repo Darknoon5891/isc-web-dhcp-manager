@@ -1,5 +1,5 @@
 /**
- * API Service Layer for DHCP Configuration Manager
+ * API Service Layer for ISC Web DHCP Configuration Manager
  * Handles all HTTP communication with the Flask backend
  */
 
@@ -65,7 +65,7 @@ export interface BackupInfo {
 class APIError extends Error {
   constructor(message: string, public status?: number) {
     super(message);
-    this.name = 'APIError';
+    this.name = "APIError";
   }
 }
 
@@ -74,20 +74,21 @@ class APIService {
 
   constructor() {
     // In development, requests will be proxied to Flask backend
-    this.baseURL = process.env.NODE_ENV === 'production' 
-      ? process.env.REACT_APP_API_URL || ''
-      : '';
+    this.baseURL =
+      process.env.NODE_ENV === "production"
+        ? process.env.REACT_APP_API_URL || ""
+        : "";
   }
 
   private async request<T>(
-    endpoint: string, 
+    endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
     const url = `${this.baseURL}/api${endpoint}`;
-    
+
     const config: RequestInit = {
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...options.headers,
       },
       ...options,
@@ -95,7 +96,7 @@ class APIService {
 
     try {
       const response = await fetch(url, config);
-      
+
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new APIError(
@@ -105,8 +106,8 @@ class APIService {
       }
 
       // Handle empty responses (e.g., from DELETE requests)
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
+      const contentType = response.headers.get("content-type");
+      if (!contentType || !contentType.includes("application/json")) {
         return {} as T;
       }
 
@@ -115,17 +116,17 @@ class APIService {
       if (error instanceof APIError) {
         throw error;
       }
-      
+
       // Network or parsing errors
       throw new APIError(
-        error instanceof Error ? error.message : 'Network error occurred'
+        error instanceof Error ? error.message : "Network error occurred"
       );
     }
   }
 
   // Host management endpoints
   async getHosts(): Promise<DHCPHost[]> {
-    return this.request<DHCPHost[]>('/hosts');
+    return this.request<DHCPHost[]>("/hosts");
   }
 
   async getHost(hostname: string): Promise<DHCPHost> {
@@ -133,55 +134,61 @@ class APIService {
   }
 
   async addHost(host: DHCPHost): Promise<DHCPHost> {
-    return this.request<DHCPHost>('/hosts', {
-      method: 'POST',
+    return this.request<DHCPHost>("/hosts", {
+      method: "POST",
       body: JSON.stringify(host),
     });
   }
 
-  async updateHost(hostname: string, updates: Partial<Omit<DHCPHost, 'hostname'>>): Promise<DHCPHost> {
+  async updateHost(
+    hostname: string,
+    updates: Partial<Omit<DHCPHost, "hostname">>
+  ): Promise<DHCPHost> {
     return this.request<DHCPHost>(`/hosts/${encodeURIComponent(hostname)}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(updates),
     });
   }
 
   async deleteHost(hostname: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/hosts/${encodeURIComponent(hostname)}`, {
-      method: 'DELETE',
-    });
+    return this.request<{ message: string }>(
+      `/hosts/${encodeURIComponent(hostname)}`,
+      {
+        method: "DELETE",
+      }
+    );
   }
 
   // Configuration management
   async getConfig(): Promise<{ config: string }> {
-    return this.request<{ config: string }>('/config');
+    return this.request<{ config: string }>("/config");
   }
 
   async validateConfig(): Promise<ConfigValidation> {
-    return this.request<ConfigValidation>('/validate', {
-      method: 'POST',
+    return this.request<ConfigValidation>("/validate", {
+      method: "POST",
     });
   }
 
   // Service management
   async getServiceStatus(): Promise<ServiceStatus> {
-    return this.request<ServiceStatus>('/service/status');
+    return this.request<ServiceStatus>("/service/status");
   }
 
   async restartService(): Promise<{ message: string; status: string }> {
-    return this.request<{ message: string; status: string }>('/restart', {
-      method: 'POST',
+    return this.request<{ message: string; status: string }>("/restart", {
+      method: "POST",
     });
   }
 
   // Backup management
   async getBackups(): Promise<BackupInfo[]> {
-    return this.request<BackupInfo[]>('/backups');
+    return this.request<BackupInfo[]>("/backups");
   }
 
   // Subnet management endpoints
   async getSubnets(): Promise<DHCPSubnet[]> {
-    return this.request<DHCPSubnet[]>('/subnets');
+    return this.request<DHCPSubnet[]>("/subnets");
   }
 
   async getSubnet(network: string): Promise<DHCPSubnet> {
@@ -189,28 +196,34 @@ class APIService {
   }
 
   async addSubnet(subnet: DHCPSubnet): Promise<DHCPSubnet> {
-    return this.request<DHCPSubnet>('/subnets', {
-      method: 'POST',
+    return this.request<DHCPSubnet>("/subnets", {
+      method: "POST",
       body: JSON.stringify(subnet),
     });
   }
 
-  async updateSubnet(network: string, updates: Partial<Omit<DHCPSubnet, 'network'>>): Promise<DHCPSubnet> {
+  async updateSubnet(
+    network: string,
+    updates: Partial<Omit<DHCPSubnet, "network">>
+  ): Promise<DHCPSubnet> {
     return this.request<DHCPSubnet>(`/subnets/${encodeURIComponent(network)}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(updates),
     });
   }
 
   async deleteSubnet(network: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/subnets/${encodeURIComponent(network)}`, {
-      method: 'DELETE',
-    });
+    return this.request<{ message: string }>(
+      `/subnets/${encodeURIComponent(network)}`,
+      {
+        method: "DELETE",
+      }
+    );
   }
 
   // Zone management endpoints
   async getZones(): Promise<DHCPZone[]> {
-    return this.request<DHCPZone[]>('/zones');
+    return this.request<DHCPZone[]>("/zones");
   }
 
   async getZone(zone_name: string): Promise<DHCPZone> {
@@ -218,40 +231,48 @@ class APIService {
   }
 
   async addZone(zone: DHCPZone): Promise<DHCPZone> {
-    return this.request<DHCPZone>('/zones', {
-      method: 'POST',
+    return this.request<DHCPZone>("/zones", {
+      method: "POST",
       body: JSON.stringify(zone),
     });
   }
 
-  async updateZone(zone_name: string, updates: Partial<Omit<DHCPZone, 'zone_name'>>): Promise<DHCPZone> {
+  async updateZone(
+    zone_name: string,
+    updates: Partial<Omit<DHCPZone, "zone_name">>
+  ): Promise<DHCPZone> {
     return this.request<DHCPZone>(`/zones/${encodeURIComponent(zone_name)}`, {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(updates),
     });
   }
 
   async deleteZone(zone_name: string): Promise<{ message: string }> {
-    return this.request<{ message: string }>(`/zones/${encodeURIComponent(zone_name)}`, {
-      method: 'DELETE',
-    });
+    return this.request<{ message: string }>(
+      `/zones/${encodeURIComponent(zone_name)}`,
+      {
+        method: "DELETE",
+      }
+    );
   }
 
   // Global configuration endpoints
   async getGlobalConfig(): Promise<DHCPGlobalConfig> {
-    return this.request<DHCPGlobalConfig>('/global-config');
+    return this.request<DHCPGlobalConfig>("/global-config");
   }
 
-  async updateGlobalConfig(config: DHCPGlobalConfig): Promise<DHCPGlobalConfig> {
-    return this.request<DHCPGlobalConfig>('/global-config', {
-      method: 'PUT',
+  async updateGlobalConfig(
+    config: DHCPGlobalConfig
+  ): Promise<DHCPGlobalConfig> {
+    return this.request<DHCPGlobalConfig>("/global-config", {
+      method: "PUT",
       body: JSON.stringify(config),
     });
   }
 
   // Utility methods
   async healthCheck(): Promise<DHCPHost[]> {
-    return this.request<DHCPHost[]>('/hosts');
+    return this.request<DHCPHost[]>("/hosts");
   }
 }
 

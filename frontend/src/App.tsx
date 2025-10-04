@@ -1,6 +1,6 @@
 /**
  * Main App Component
- * DHCP Configuration Manager - Web interface for managing ISC DHCP Server configuration
+ * ISC Web DHCP Configuration Manager - Web interface for managing ISC DHCP Server configuration
  */
 
 import React, { useState, useEffect } from "react";
@@ -129,7 +129,7 @@ function App() {
       {/* Header */}
       <div className="header">
         <div className="container">
-          <h1>DHCP Configuration Manager</h1>
+          <h1>ISC Web DHCP Configuration Manager</h1>
         </div>
       </div>
 
@@ -303,8 +303,8 @@ function App() {
           }}
         >
           <p>
-            DHCP Configuration Manager v1.0.0 - A web interface for managing ISC
-            DHCP Server configuration
+            ISC Web DHCP Configuration Manager v1.0.0 - A web interface for
+            managing ISC DHCP Server configuration
           </p>
           <p>
             <strong>Important:</strong> Always validate configuration before
