@@ -12,6 +12,7 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 APP_SOURCE="/app"
+CONFIG_SOURCE="/app/config"
 FRONTEND_SOURCE="/app/frontend"
 WEB_ROOT="/var/www/dhcp-manager"
 BACKEND_USER="dhcp-manager"
@@ -227,9 +228,17 @@ chown -R "$BACKEND_USER":"$BACKEND_USER" /etc/isc-web-dhcp-manager
 chmod 750 /etc/isc-web-dhcp-manager
 chmod 770 /etc/isc-web-dhcp-manager/backups
 
+# Copy configuration schema to /etc
+cp "$CONFIG_SOURCE/config_schema.json" /etc/isc-web-dhcp-manager/config_schema.json
+chown "$BACKEND_USER":"$BACKEND_USER" /etc/isc-web-dhcp-manager/config_schema.json
+chmod 644 /etc/isc-web-dhcp-manager/config_schema.json
+
 # Create application config file
 cat > /etc/isc-web-dhcp-manager/config.conf <<APPCONFEOF
 # ISC Web DHCP Manager Configuration
+#
+# IMPORTANT: When adding new configuration options, update the schema file:
+# /etc/isc-web-dhcp-manager/config_schema.json
 
 # Flask Environment
 FLASK_ENV=production

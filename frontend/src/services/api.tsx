@@ -275,6 +275,22 @@ class APIService {
     return this.request<{ hostname: string }>("/system/hostname");
   }
 
+  // App configuration endpoints
+  async getAppConfig(): Promise<{ [key: string]: string }> {
+    return this.request<{ [key: string]: string }>("/app-config");
+  }
+
+  async getAppConfigSchema(): Promise<any> {
+    return this.request<any>("/app-config/schema");
+  }
+
+  async updateAppConfig(config: { [key: string]: string }): Promise<{ [key: string]: string }> {
+    return this.request<{ [key: string]: string }>("/app-config", {
+      method: "PUT",
+      body: JSON.stringify(config),
+    });
+  }
+
   // Utility methods
   async healthCheck(): Promise<DHCPHost[]> {
     return this.request<DHCPHost[]>("/hosts");

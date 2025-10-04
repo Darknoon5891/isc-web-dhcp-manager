@@ -8,7 +8,6 @@ __pycache__/
 
 # Distribution / packaging
 .Python
-build/
 develop-eggs/
 dist/
 downloads/
@@ -218,7 +217,6 @@ __marimo__/
 # NPM
 */node_modules/**
 node_modules/**
-*/build/**
 
 # DEV
 claude.md

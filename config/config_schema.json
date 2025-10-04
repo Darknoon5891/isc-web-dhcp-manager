@@ -1,0 +1,119 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ISC Web DHCP Manager Configuration Schema",
+  "description": "Schema for /etc/isc-web-dhcp-manager/config.conf - Update this file when adding new configuration options",
+  "type": "object",
+  "properties": {
+    "FLASK_ENV": {
+      "type": "string",
+      "enum": ["production", "development"],
+      "description": "Flask environment mode",
+      "readOnly": true,
+      "section": "Flask Environment",
+      "order": 1
+    },
+    "SECRET_KEY": {
+      "type": "string",
+      "description": "Flask secret key for sessions and security (auto-generated)",
+      "readOnly": true,
+      "section": "Flask Environment",
+      "order": 2,
+      "sensitive": true
+    },
+    "FLASK_DEBUG": {
+      "type": "boolean",
+      "description": "Enable Flask debug mode (should be false in production)",
+      "default": "false",
+      "section": "Flask Environment",
+      "order": 3
+    },
+    "DHCP_CONFIG_PATH": {
+      "type": "string",
+      "format": "path",
+      "description": "Absolute path to ISC DHCP configuration file",
+      "default": "/etc/dhcp/dhcpd.conf",
+      "section": "DHCP Configuration",
+      "order": 10
+    },
+    "DHCP_BACKUP_DIR": {
+      "type": "string",
+      "format": "path",
+      "description": "Directory where configuration backups are stored",
+      "default": "/etc/isc-web-dhcp-manager/backups",
+      "section": "DHCP Configuration",
+      "order": 11
+    },
+    "DHCP_SERVICE_NAME": {
+      "type": "string",
+      "description": "Systemd service name for the DHCP server",
+      "default": "isc-dhcp-server",
+      "section": "DHCP Configuration",
+      "order": 12
+    },
+    "ALLOW_SERVICE_RESTART": {
+      "type": "boolean",
+      "description": "Allow restarting DHCP service through web interface",
+      "default": "true",
+      "section": "Application Settings",
+      "order": 20
+    },
+    "MAX_HOSTNAME_LENGTH": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 255,
+      "description": "Maximum allowed length for hostnames",
+      "default": "255",
+      "section": "Application Settings",
+      "order": 21
+    },
+    "MAX_BACKUPS": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "description": "Maximum number of backup files to retain",
+      "default": "10",
+      "section": "Application Settings",
+      "order": 22
+    },
+    "REQUIRE_SUDO": {
+      "type": "boolean",
+      "description": "Require sudo privileges for system operations",
+      "default": "true",
+      "section": "Application Settings",
+      "order": 23
+    },
+    "CORS_ORIGINS": {
+      "type": "string",
+      "description": "Allowed CORS origins (comma-separated, or * for all)",
+      "default": "*",
+      "section": "CORS Settings",
+      "order": 30
+    },
+    "LOG_LEVEL": {
+      "type": "string",
+      "enum": ["DEBUG", "INFO", "WARNING", "ERROR"],
+      "description": "Application logging level",
+      "default": "INFO",
+      "section": "Logging",
+      "order": 40
+    },
+    "LOGGING_PATH": {
+      "type": "string",
+      "format": "path",
+      "description": "Directory for application log files",
+      "default": "/var/log/isc-web-dhcp-manager",
+      "section": "Logging",
+      "order": 41
+    }
+  },
+  "required": [
+    "FLASK_ENV",
+    "SECRET_KEY",
+    "DHCP_CONFIG_PATH",
+    "DHCP_BACKUP_DIR",
+    "DHCP_SERVICE_NAME",
+    "MAX_HOSTNAME_LENGTH",
+    "MAX_BACKUPS",
+    "CORS_ORIGINS"
+  ]
+}

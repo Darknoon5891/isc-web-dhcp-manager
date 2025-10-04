@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone, DHCPGlobalConfig
 from config import get_config
+from config_manager import ConfigManager
 
 
 def create_app():
@@ -25,6 +26,9 @@ def create_app():
     
     # Initialize DHCP parser
     dhcp_parser = DHCPParser(app.config['DHCP_CONFIG_PATH'])
+
+    # Initialize config manager
+    config_manager = ConfigManager()
     
     @app.errorhandler(400)
     def bad_request(error):
@@ -563,6 +567,71 @@ def create_app():
             return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
         except Exception as e:
             return jsonify({'error': 'Failed to update global configuration', 'message': str(e)}), 500
+
+    # App configuration endpoints
+    @app.route(f"{app.config['API_PREFIX']}/app-config", methods=['GET'])
+    def get_app_config():
+        """Get application configuration with sensitive values masked"""
+        try:
+            config = config_manager.read_config()
+            masked_config = config_manager.mask_sensitive_values(config)
+            return jsonify(masked_config)
+        except FileNotFoundError as e:
+            return jsonify({'error': 'Configuration file not found', 'message': str(e)}), 404
+        except PermissionError:
+            return jsonify({'error': 'Permission denied accessing application configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to read application configuration', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/app-config/schema", methods=['GET'])
+    def get_app_config_schema():
+        """Get configuration schema for frontend form generation"""
+        try:
+            schema = config_manager.get_schema()
+            return jsonify(schema)
+        except Exception as e:
+            return jsonify({'error': 'Failed to read configuration schema', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/app-config", methods=['PUT'])
+    def update_app_config():
+        """Update application configuration"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No JSON data provided'}), 400
+
+            # Read current config to preserve read-only fields
+            current_config = config_manager.read_config()
+            properties = config_manager.get_schema().get('properties', {})
+
+            # Filter out read-only fields from the update
+            updated_config = current_config.copy()
+            for key, value in data.items():
+                if key in properties:
+                    # Skip read-only fields
+                    if properties[key].get('readOnly'):
+                        continue
+                    updated_config[key] = value
+
+            # Validate before writing
+            errors = config_manager.validate_config(updated_config)
+            if errors:
+                return jsonify({'error': 'Validation failed', 'message': '; '.join(errors)}), 400
+
+            # Write configuration
+            config_manager.write_config(updated_config)
+
+            # Return updated config with masked values
+            final_config = config_manager.read_config()
+            masked_config = config_manager.mask_sensitive_values(final_config)
+            return jsonify(masked_config)
+
+        except ValueError as e:
+            return jsonify({'error': 'Validation error', 'message': str(e)}), 400
+        except PermissionError:
+            return jsonify({'error': 'Permission denied writing application configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to update application configuration', 'message': str(e)}), 500
 
     return app
 

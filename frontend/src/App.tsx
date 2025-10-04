@@ -12,6 +12,7 @@ import ZoneList from "./components/ZoneList";
 import ZoneForm from "./components/ZoneForm";
 import GlobalConfigForm from "./components/GlobalConfigForm";
 import ConfigViewer from "./components/ConfigViewer";
+import AppSettingsForm from "./components/AppSettingsForm";
 import apiService, {
   DHCPHost,
   DHCPSubnet,
@@ -19,7 +20,7 @@ import apiService, {
   APIError,
 } from "./services/api";
 
-type ActiveTab = "hosts" | "subnets" | "zones" | "global" | "config";
+type ActiveTab = "hosts" | "subnets" | "zones" | "global" | "config" | "appsettings";
 
 function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("hosts");
@@ -193,6 +194,12 @@ function App() {
           >
             DHCP Service Status
           </button>
+          <button
+            className={`tab ${activeTab === "appsettings" ? "active" : ""}`}
+            onClick={() => handleTabChange("appsettings")}
+          >
+            App Settings
+          </button>
         </div>
 
         {/* Tab Content */}
@@ -315,6 +322,10 @@ function App() {
             refreshTrigger={refreshTrigger}
             showOnlyServiceStatus={true}
           />
+        )}
+
+        {activeTab === "appsettings" && (
+          <AppSettingsForm refreshTrigger={refreshTrigger} />
         )}
 
         {/* Footer */}
