@@ -24,6 +24,20 @@ export interface DHCPZone {
   secondary?: string[];
 }
 
+export interface DHCPGlobalConfig {
+  default_lease_time: number;
+  max_lease_time: number;
+  authoritative: boolean;
+  log_facility?: string | null;
+  domain_name?: string | null;
+  domain_name_servers?: string | null;
+  ntp_servers?: string | null;
+  time_offset?: number | null;
+  ddns_update_style: string;
+  ping_check: boolean;
+  ping_timeout?: number | null;
+}
+
 export interface APIResponse<T> {
   data?: T;
   error?: string;
@@ -220,6 +234,18 @@ class APIService {
   async deleteZone(zone_name: string): Promise<{ message: string }> {
     return this.request<{ message: string }>(`/zones/${encodeURIComponent(zone_name)}`, {
       method: 'DELETE',
+    });
+  }
+
+  // Global configuration endpoints
+  async getGlobalConfig(): Promise<DHCPGlobalConfig> {
+    return this.request<DHCPGlobalConfig>('/global-config');
+  }
+
+  async updateGlobalConfig(config: DHCPGlobalConfig): Promise<DHCPGlobalConfig> {
+    return this.request<DHCPGlobalConfig>('/global-config', {
+      method: 'PUT',
+      body: JSON.stringify(config),
     });
   }
 

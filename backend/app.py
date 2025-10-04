@@ -7,7 +7,7 @@ import os
 import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone
+from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone, DHCPGlobalConfig
 from config import get_config, create_test_config
 
 
@@ -511,6 +511,52 @@ def create_app():
             return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
         except Exception as e:
             return jsonify({'error': 'Failed to delete zone', 'message': str(e)}), 500
+
+    # Global configuration endpoints
+    @app.route(f"{app.config['API_PREFIX']}/global-config", methods=['GET'])
+    def get_global_config():
+        """Get global DHCP configuration settings"""
+        try:
+            config = dhcp_parser.parse_global_config()
+            return jsonify(config.to_dict())
+        except PermissionError:
+            return jsonify({'error': 'Permission denied accessing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to read global configuration', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/global-config", methods=['PUT'])
+    def update_global_config():
+        """Update global DHCP configuration settings"""
+        try:
+            data = request.get_json()
+            if not data:
+                return jsonify({'error': 'No JSON data provided'}), 400
+
+            # Create DHCPGlobalConfig object from request data
+            config = DHCPGlobalConfig(
+                default_lease_time=data.get('default_lease_time', 600),
+                max_lease_time=data.get('max_lease_time', 7200),
+                authoritative=data.get('authoritative', False),
+                log_facility=data.get('log_facility'),
+                domain_name=data.get('domain_name'),
+                domain_name_servers=data.get('domain_name_servers'),
+                ntp_servers=data.get('ntp_servers'),
+                time_offset=data.get('time_offset'),
+                ddns_update_style=data.get('ddns_update_style', 'none'),
+                ping_check=data.get('ping_check', False),
+                ping_timeout=data.get('ping_timeout')
+            )
+
+            dhcp_parser.update_global_config(config)
+            updated_config = dhcp_parser.parse_global_config()
+            return jsonify(updated_config.to_dict())
+
+        except ValueError as e:
+            return jsonify({'error': 'Validation error', 'message': str(e)}), 400
+        except PermissionError:
+            return jsonify({'error': 'Permission denied writing DHCP configuration'}), 403
+        except Exception as e:
+            return jsonify({'error': 'Failed to update global configuration', 'message': str(e)}), 500
 
     return app
 

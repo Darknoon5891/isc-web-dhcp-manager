@@ -105,6 +105,84 @@ class DHCPZone:
         return '\n'.join(lines)
 
 
+class DHCPGlobalConfig:
+    """Represents DHCP global configuration settings"""
+    def __init__(self,
+                 default_lease_time: int = 600,
+                 max_lease_time: int = 7200,
+                 authoritative: bool = False,
+                 log_facility: str = None,
+                 domain_name: str = None,
+                 domain_name_servers: str = None,
+                 ntp_servers: str = None,
+                 time_offset: int = None,
+                 ddns_update_style: str = 'none',
+                 ping_check: bool = False,
+                 ping_timeout: int = None):
+        self.default_lease_time = default_lease_time
+        self.max_lease_time = max_lease_time
+        self.authoritative = authoritative
+        self.log_facility = log_facility
+        self.domain_name = domain_name
+        self.domain_name_servers = domain_name_servers
+        self.ntp_servers = ntp_servers
+        self.time_offset = time_offset
+        self.ddns_update_style = ddns_update_style
+        self.ping_check = ping_check
+        self.ping_timeout = ping_timeout
+
+    def to_dict(self) -> Dict:
+        return {
+            'default_lease_time': self.default_lease_time,
+            'max_lease_time': self.max_lease_time,
+            'authoritative': self.authoritative,
+            'log_facility': self.log_facility,
+            'domain_name': self.domain_name,
+            'domain_name_servers': self.domain_name_servers,
+            'ntp_servers': self.ntp_servers,
+            'time_offset': self.time_offset,
+            'ddns_update_style': self.ddns_update_style,
+            'ping_check': self.ping_check,
+            'ping_timeout': self.ping_timeout
+        }
+
+    def to_dhcp_config_lines(self) -> List[str]:
+        """Convert to DHCP configuration lines"""
+        lines = []
+        lines.append("# Global Configuration")
+        lines.append(f"default-lease-time {self.default_lease_time};")
+        lines.append(f"max-lease-time {self.max_lease_time};")
+
+        if self.authoritative:
+            lines.append("authoritative;")
+
+        if self.log_facility:
+            lines.append(f"log-facility {self.log_facility};")
+
+        if self.ddns_update_style:
+            lines.append(f"ddns-update-style {self.ddns_update_style};")
+
+        if self.ping_check:
+            lines.append("ping-check true;")
+            if self.ping_timeout:
+                lines.append(f"ping-timeout {self.ping_timeout};")
+
+        # Global options
+        if self.domain_name:
+            lines.append(f'option domain-name "{self.domain_name}";')
+
+        if self.domain_name_servers:
+            lines.append(f"option domain-name-servers {self.domain_name_servers};")
+
+        if self.ntp_servers:
+            lines.append(f"option ntp-servers {self.ntp_servers};")
+
+        if self.time_offset is not None:
+            lines.append(f"option time-offset {self.time_offset};")
+
+        return lines
+
+
 class DHCPParser:
     """Parser for ISC DHCP Server configuration files"""
     
@@ -968,6 +1046,291 @@ class DHCPParser:
 
         self.write_config(new_content_zones)
         return True
+
+    def parse_global_config(self) -> DHCPGlobalConfig:
+        """Parse global configuration settings from the DHCP config file"""
+        content = self.read_config()
+        lines = content.split('\n')
+
+        # Default values
+        config = DHCPGlobalConfig()
+
+        # Parse global settings (stop at first subnet, host, or zone declaration)
+        for line in lines:
+            stripped = line.strip()
+
+            # Stop parsing at first subnet/host/zone declaration
+            if (stripped.startswith('subnet ') or
+                stripped.startswith('host ') or
+                stripped.startswith('zone ')):
+                break
+
+            # Skip comments and empty lines
+            if not stripped or stripped.startswith('#'):
+                continue
+
+            # Parse default-lease-time
+            match = re.match(r'default-lease-time\s+(\d+)\s*;', stripped)
+            if match:
+                config.default_lease_time = int(match.group(1))
+                continue
+
+            # Parse max-lease-time
+            match = re.match(r'max-lease-time\s+(\d+)\s*;', stripped)
+            if match:
+                config.max_lease_time = int(match.group(1))
+                continue
+
+            # Parse authoritative
+            if stripped == 'authoritative;':
+                config.authoritative = True
+                continue
+
+            # Parse log-facility
+            match = re.match(r'log-facility\s+([a-z0-9-]+)\s*;', stripped)
+            if match:
+                config.log_facility = match.group(1)
+                continue
+
+            # Parse ddns-update-style
+            match = re.match(r'ddns-update-style\s+([a-z-]+)\s*;', stripped)
+            if match:
+                config.ddns_update_style = match.group(1)
+                continue
+
+            # Parse ping-check
+            match = re.match(r'ping-check\s+(true|false)\s*;', stripped)
+            if match:
+                config.ping_check = match.group(1) == 'true'
+                continue
+
+            # Parse ping-timeout
+            match = re.match(r'ping-timeout\s+(\d+)\s*;', stripped)
+            if match:
+                config.ping_timeout = int(match.group(1))
+                continue
+
+            # Parse option domain-name
+            match = re.match(r'option\s+domain-name\s+"([^"]+)"\s*;', stripped)
+            if match:
+                config.domain_name = match.group(1)
+                continue
+
+            # Parse option domain-name-servers
+            match = re.match(r'option\s+domain-name-servers\s+([^;]+)\s*;', stripped)
+            if match:
+                config.domain_name_servers = match.group(1).strip()
+                continue
+
+            # Parse option ntp-servers
+            match = re.match(r'option\s+ntp-servers\s+([^;]+)\s*;', stripped)
+            if match:
+                config.ntp_servers = match.group(1).strip()
+                continue
+
+            # Parse option time-offset
+            match = re.match(r'option\s+time-offset\s+(-?\d+)\s*;', stripped)
+            if match:
+                config.time_offset = int(match.group(1))
+                continue
+
+        return config
+
+    def update_global_config(self, new_config: DHCPGlobalConfig) -> bool:
+        """Update global configuration settings"""
+        # Validate lease times
+        if new_config.default_lease_time <= 0:
+            raise ValueError("default-lease-time must be positive")
+        if new_config.max_lease_time <= 0:
+            raise ValueError("max-lease-time must be positive")
+        if new_config.max_lease_time < new_config.default_lease_time:
+            raise ValueError("max-lease-time must be greater than or equal to default-lease-time")
+
+        # Validate log facility
+        valid_facilities = ['daemon', 'local0', 'local1', 'local2', 'local3', 'local4', 'local5', 'local6', 'local7']
+        if new_config.log_facility and new_config.log_facility not in valid_facilities:
+            raise ValueError(f"Invalid log-facility. Must be one of: {', '.join(valid_facilities)}")
+
+        # Validate ddns-update-style
+        valid_ddns = ['none', 'interim', 'ad-hoc']
+        if new_config.ddns_update_style and new_config.ddns_update_style not in valid_ddns:
+            raise ValueError(f"Invalid ddns-update-style. Must be one of: {', '.join(valid_ddns)}")
+
+        # Validate domain name servers (if provided)
+        if new_config.domain_name_servers:
+            dns_list = [s.strip() for s in new_config.domain_name_servers.split(',')]
+            for dns in dns_list:
+                if not self.validate_ip_address(dns):
+                    raise ValueError(f"Invalid DNS server IP address: {dns}")
+
+        # Validate NTP servers (if provided)
+        if new_config.ntp_servers:
+            ntp_list = [s.strip() for s in new_config.ntp_servers.split(',')]
+            for ntp in ntp_list:
+                if not self.validate_ip_address(ntp):
+                    raise ValueError(f"Invalid NTP server IP address: {ntp}")
+
+        # Create backup before modification
+        self.create_backup()
+
+        # Read current content
+        content = self.read_config()
+        lines = content.split('\n')
+
+        # Track which global settings we've found and replaced
+        replaced_settings = set()
+        new_lines = []
+        global_section_ended = False
+
+        for line in lines:
+            stripped = line.strip()
+
+            # Check if global section has ended
+            if (stripped.startswith('subnet ') or
+                stripped.startswith('host ') or
+                stripped.startswith('zone ')):
+                # If we haven't added all global settings yet, add them now
+                if not global_section_ended:
+                    global_section_ended = True
+                    # Add any missing settings
+                    self._add_missing_global_settings(new_lines, new_config, replaced_settings)
+                    new_lines.append('')  # Empty line before first declaration
+
+                new_lines.append(line)
+                continue
+
+            # Replace existing global settings
+            if not global_section_ended:
+                # Skip empty lines and comments in global section
+                if not stripped or stripped.startswith('#'):
+                    new_lines.append(line)
+                    continue
+
+                # Check and replace each setting
+                if re.match(r'default-lease-time\s+\d+\s*;', stripped):
+                    if 'default-lease-time' not in replaced_settings:
+                        new_lines.append(f"default-lease-time {new_config.default_lease_time};")
+                        replaced_settings.add('default-lease-time')
+                    continue
+
+                if re.match(r'max-lease-time\s+\d+\s*;', stripped):
+                    if 'max-lease-time' not in replaced_settings:
+                        new_lines.append(f"max-lease-time {new_config.max_lease_time};")
+                        replaced_settings.add('max-lease-time')
+                    continue
+
+                if stripped == 'authoritative;':
+                    if 'authoritative' not in replaced_settings:
+                        if new_config.authoritative:
+                            new_lines.append("authoritative;")
+                        replaced_settings.add('authoritative')
+                    continue
+
+                if re.match(r'log-facility\s+', stripped):
+                    if 'log-facility' not in replaced_settings:
+                        if new_config.log_facility:
+                            new_lines.append(f"log-facility {new_config.log_facility};")
+                        replaced_settings.add('log-facility')
+                    continue
+
+                if re.match(r'ddns-update-style\s+', stripped):
+                    if 'ddns-update-style' not in replaced_settings:
+                        if new_config.ddns_update_style:
+                            new_lines.append(f"ddns-update-style {new_config.ddns_update_style};")
+                        replaced_settings.add('ddns-update-style')
+                    continue
+
+                if re.match(r'ping-check\s+', stripped):
+                    if 'ping-check' not in replaced_settings:
+                        if new_config.ping_check:
+                            new_lines.append("ping-check true;")
+                            if new_config.ping_timeout:
+                                new_lines.append(f"ping-timeout {new_config.ping_timeout};")
+                        replaced_settings.add('ping-check')
+                        replaced_settings.add('ping-timeout')
+                    continue
+
+                if re.match(r'ping-timeout\s+', stripped):
+                    if 'ping-timeout' not in replaced_settings:
+                        # Skip - handled with ping-check
+                        replaced_settings.add('ping-timeout')
+                    continue
+
+                if re.match(r'option\s+domain-name\s+"', stripped):
+                    if 'domain-name' not in replaced_settings:
+                        if new_config.domain_name:
+                            new_lines.append(f'option domain-name "{new_config.domain_name}";')
+                        replaced_settings.add('domain-name')
+                    continue
+
+                if re.match(r'option\s+domain-name-servers\s+', stripped):
+                    if 'domain-name-servers' not in replaced_settings:
+                        if new_config.domain_name_servers:
+                            new_lines.append(f"option domain-name-servers {new_config.domain_name_servers};")
+                        replaced_settings.add('domain-name-servers')
+                    continue
+
+                if re.match(r'option\s+ntp-servers\s+', stripped):
+                    if 'ntp-servers' not in replaced_settings:
+                        if new_config.ntp_servers:
+                            new_lines.append(f"option ntp-servers {new_config.ntp_servers};")
+                        replaced_settings.add('ntp-servers')
+                    continue
+
+                if re.match(r'option\s+time-offset\s+', stripped):
+                    if 'time-offset' not in replaced_settings:
+                        if new_config.time_offset is not None:
+                            new_lines.append(f"option time-offset {new_config.time_offset};")
+                        replaced_settings.add('time-offset')
+                    continue
+
+                # Keep any other lines in global section
+                new_lines.append(line)
+            else:
+                # After global section, keep everything as-is
+                new_lines.append(line)
+
+        # If no declarations found (empty file or only global settings), add missing settings
+        if not global_section_ended:
+            self._add_missing_global_settings(new_lines, new_config, replaced_settings)
+
+        new_content = '\n'.join(new_lines)
+        self.write_config(new_content)
+        return True
+
+    def _add_missing_global_settings(self, lines: List[str], config: DHCPGlobalConfig, replaced: set) -> None:
+        """Add global settings that weren't found in the config file"""
+        if 'default-lease-time' not in replaced:
+            lines.append(f"default-lease-time {config.default_lease_time};")
+
+        if 'max-lease-time' not in replaced:
+            lines.append(f"max-lease-time {config.max_lease_time};")
+
+        if 'authoritative' not in replaced and config.authoritative:
+            lines.append("authoritative;")
+
+        if 'log-facility' not in replaced and config.log_facility:
+            lines.append(f"log-facility {config.log_facility};")
+
+        if 'ddns-update-style' not in replaced and config.ddns_update_style:
+            lines.append(f"ddns-update-style {config.ddns_update_style};")
+
+        if 'ping-check' not in replaced and config.ping_check:
+            lines.append("ping-check true;")
+            if config.ping_timeout:
+                lines.append(f"ping-timeout {config.ping_timeout};")
+
+        if 'domain-name' not in replaced and config.domain_name:
+            lines.append(f'option domain-name "{config.domain_name}";')
+
+        if 'domain-name-servers' not in replaced and config.domain_name_servers:
+            lines.append(f"option domain-name-servers {config.domain_name_servers};")
+
+        if 'ntp-servers' not in replaced and config.ntp_servers:
+            lines.append(f"option ntp-servers {config.ntp_servers};")
+
+        if 'time-offset' not in replaced and config.time_offset is not None:
+            lines.append(f"option time-offset {config.time_offset};")
 
     def _replace_zone_in_config(self, zone_name: str, new_zone: DHCPZone) -> bool:
         """Replace a zone declaration in the configuration"""

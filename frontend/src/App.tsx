@@ -10,6 +10,7 @@ import SubnetList from "./components/SubnetList";
 import SubnetForm from "./components/SubnetForm";
 import ZoneList from "./components/ZoneList";
 import ZoneForm from "./components/ZoneForm";
+import GlobalConfigForm from "./components/GlobalConfigForm";
 import ConfigViewer from "./components/ConfigViewer";
 import apiService, {
   DHCPHost,
@@ -18,7 +19,7 @@ import apiService, {
   APIError,
 } from "./services/api";
 
-type ActiveTab = "hosts" | "subnets" | "zones" | "config";
+type ActiveTab = "hosts" | "subnets" | "zones" | "global" | "config";
 
 function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("hosts");
@@ -166,6 +167,12 @@ function App() {
             PTR Zones
           </button>
           <button
+            className={`tab ${activeTab === "global" ? "active" : ""}`}
+            onClick={() => handleTabChange("global")}
+          >
+            Global Settings
+          </button>
+          <button
             className={`tab ${activeTab === "config" ? "active" : ""}`}
             onClick={() => handleTabChange("config")}
           >
@@ -274,6 +281,10 @@ function App() {
               />
             )}
           </div>
+        )}
+
+        {activeTab === "global" && (
+          <GlobalConfigForm refreshTrigger={refreshTrigger} />
         )}
 
         {activeTab === "config" && (
