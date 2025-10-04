@@ -8,7 +8,7 @@ import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone, DHCPGlobalConfig
-from config import get_config, create_test_config
+from config import get_config
 
 
 def create_app():
@@ -24,10 +24,6 @@ def create_app():
     
     # Initialize DHCP parser
     dhcp_parser = DHCPParser(app.config['DHCP_CONFIG_PATH'])
-    
-    # Create test configuration if in development mode and file doesn't exist
-    if app.config['DEBUG'] and not os.path.exists(app.config['DHCP_CONFIG_PATH']):
-        create_test_config()
     
     @app.errorhandler(400)
     def bad_request(error):

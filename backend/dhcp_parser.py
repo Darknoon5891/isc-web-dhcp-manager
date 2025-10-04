@@ -300,9 +300,8 @@ class DHCPParser:
                     stat_info = os.stat(self.config_path)
                     os.chmod(temp_path, stat_info.st_mode)
                     try:
-                        # IMPORTANT: Owner must always be root (UID 0) for ISC DHCP to start
-                        # Only copy the group from the original file
-                        os.chown(temp_path, 0, stat_info.st_gid)
+                        # Preserve original ownership (UID and GID)
+                        os.chown(temp_path, stat_info.st_uid, stat_info.st_gid)
                     except (PermissionError, OSError):
                         # chown may fail if not running as root, that's ok
                         pass
