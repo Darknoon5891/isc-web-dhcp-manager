@@ -9,26 +9,52 @@ import socket
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone, DHCPGlobalConfig
-from config import get_config
 from config_manager import ConfigManager
 
 
 def create_app():
     """Application factory"""
     app = Flask(__name__)
-    
-    # Load configuration
-    config_class = get_config()
-    app.config.from_object(config_class)
-    
+
+    # Load configuration from ConfigManager
+    config_manager = ConfigManager()
+    config_dict = config_manager.read_config()
+
+    # Load all config values into Flask config
+    for key, value in config_dict.items():
+        app.config[key] = value
+
+    # Type conversions for specific fields
+    if 'FLASK_DEBUG' in app.config:
+        app.config['DEBUG'] = app.config['FLASK_DEBUG'].lower() == 'true'
+
+    if 'ALLOW_SERVICE_RESTART' in app.config:
+        app.config['ALLOW_SERVICE_RESTART'] = app.config['ALLOW_SERVICE_RESTART'].lower() == 'true'
+
+    if 'REQUIRE_SUDO' in app.config:
+        app.config['REQUIRE_SUDO'] = app.config['REQUIRE_SUDO'].lower() == 'true'
+
+    if 'MAX_HOSTNAME_LENGTH' in app.config:
+        app.config['MAX_HOSTNAME_LENGTH'] = int(app.config['MAX_HOSTNAME_LENGTH'])
+
+    if 'MAX_BACKUPS' in app.config:
+        app.config['MAX_BACKUPS'] = int(app.config['MAX_BACKUPS'])
+
+    # Parse CORS_ORIGINS into list
+    if 'CORS_ORIGINS' in app.config:
+        app.config['CORS_ORIGINS'] = app.config['CORS_ORIGINS'].split(',')
+
+    # Validate required fields exist
+    required_fields = ['SECRET_KEY', 'DHCP_CONFIG_PATH', 'DHCP_BACKUP_DIR', 'DHCP_SERVICE_NAME', 'API_PREFIX']
+    for field in required_fields:
+        if not app.config.get(field):
+            raise ValueError(f"{field} must be set in configuration file")
+
     # Initialize CORS
     CORS(app, origins=app.config['CORS_ORIGINS'])
-    
+
     # Initialize DHCP parser
     dhcp_parser = DHCPParser(app.config['DHCP_CONFIG_PATH'])
-
-    # Initialize config manager
-    config_manager = ConfigManager()
     
     @app.errorhandler(400)
     def bad_request(error):

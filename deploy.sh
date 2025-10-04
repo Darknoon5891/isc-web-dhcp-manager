@@ -240,6 +240,9 @@ cat > /etc/isc-web-dhcp-manager/config.conf <<APPCONFEOF
 # IMPORTANT: When adding new configuration options, update the schema file:
 # /etc/isc-web-dhcp-manager/config_schema.json
 
+# API Prefix:
+API_PREFIX=/api
+
 # Flask Environment
 FLASK_ENV=production
 
