@@ -5,6 +5,7 @@ Provides REST API for managing ISC DHCP Server configuration
 
 import os
 import subprocess
+import socket
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone, DHCPGlobalConfig
@@ -46,6 +47,15 @@ def create_app():
             'service': 'ISC Web DHCP Configuration Manager',
             'version': '1.0.0'
         })
+
+    @app.route(f"{app.config['API_PREFIX']}/system/hostname", methods=['GET'])
+    def get_system_hostname():
+        """Get the server hostname"""
+        try:
+            hostname = socket.gethostname()
+            return jsonify({'hostname': hostname})
+        except Exception as e:
+            return jsonify({'error': 'Failed to get hostname', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/hosts", methods=['GET'])
     def get_hosts():

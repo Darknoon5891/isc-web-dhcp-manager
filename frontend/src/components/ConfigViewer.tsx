@@ -13,9 +13,13 @@ import apiService, {
 
 interface ConfigViewerProps {
   refreshTrigger: number;
+  showOnlyServiceStatus?: boolean;
 }
 
-const ConfigViewer: React.FC<ConfigViewerProps> = ({ refreshTrigger }) => {
+const ConfigViewer: React.FC<ConfigViewerProps> = ({
+  refreshTrigger,
+  showOnlyServiceStatus = false,
+}) => {
   const [config, setConfig] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,10 +73,16 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({ refreshTrigger }) => {
   };
 
   useEffect(() => {
-    loadConfig();
-    loadServiceStatus();
-    loadBackups();
-  }, [refreshTrigger]);
+    if (showOnlyServiceStatus) {
+      // Only load service status for the Service Configuration tab
+      loadServiceStatus();
+    } else {
+      // Load everything for the Global Configuration tab
+      loadConfig();
+      loadServiceStatus();
+      loadBackups();
+    }
+  }, [refreshTrigger, showOnlyServiceStatus]);
 
   const handleValidate = async () => {
     try {
@@ -142,7 +152,7 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({ refreshTrigger }) => {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  if (loading) {
+  if (loading && !showOnlyServiceStatus) {
     return (
       <div className="card">
         <div className="loading">Loading configuration...</div>
@@ -150,146 +160,153 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({ refreshTrigger }) => {
     );
   }
 
-  return (
-    <div>
-      {/* Restart Confirmation Modal */}
-      {showRestartConfirm && (
-        <div
-          style={{
-            position: "fixed",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(0, 0, 0, 0.5)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 1000,
-          }}
-        >
+  // If showOnlyServiceStatus is true, only show service status
+  if (showOnlyServiceStatus) {
+    return (
+      <div>
+        {/* Restart Confirmation Modal */}
+        {showRestartConfirm && (
           <div
             style={{
-              backgroundColor: "white",
-              padding: "30px",
-              borderRadius: "8px",
-              maxWidth: "500px",
-              width: "90%",
-              boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
             }}
           >
-            <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
-              Confirm Service Restart
-            </h3>
-            <p style={{ marginBottom: "20px", color: "#666" }}>
-              Are you sure you want to restart the DHCP service? This may
-              temporarily interrupt network services.
-            </p>
+            <div
+              style={{
+                backgroundColor: "white",
+                padding: "30px",
+                borderRadius: "8px",
+                maxWidth: "500px",
+                width: "90%",
+                boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+              }}
+            >
+              <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
+                Confirm Service Restart
+              </h3>
+              <p style={{ marginBottom: "20px", color: "#666" }}>
+                Are you sure you want to restart the DHCP service? This may
+                temporarily interrupt network services.
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  className="btn"
+                  onClick={handleRestartCancel}
+                  style={{ background: "#95a5a6" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn"
+                  onClick={handleRestartConfirm}
+                  style={{ background: "#e74c3c" }}
+                >
+                  Restart Service
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Service Status Card */}
+        {serviceStatus && (
+          <div className="card">
+            <h3>DHCP Service Status</h3>
             <div
               style={{
                 display: "flex",
-                gap: "10px",
-                justifyContent: "flex-end",
+                alignItems: "center",
+                gap: "15px",
+                marginBottom: "15px",
               }}
             >
+              <div>
+                <strong>Service:</strong> {serviceStatus.service}
+              </div>
+              <div>
+                <strong>Status:</strong>{" "}
+                <span
+                  style={{
+                    color: serviceStatus.active ? "#27ae60" : "#e74c3c",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {serviceStatus.status}
+                </span>
+              </div>
               <button
                 className="btn"
-                onClick={handleRestartCancel}
-                style={{ background: "#95a5a6" }}
+                onClick={handleRestartClick}
+                disabled={restarting}
               >
-                Cancel
-              </button>
-              <button
-                className="btn"
-                onClick={handleRestartConfirm}
-                style={{ background: "#e74c3c" }}
-              >
-                Restart Service
+                {restarting ? "Restarting..." : "Restart Service"}
               </button>
             </div>
+
+            {restartMessage && (
+              <div
+                className={`alert ${
+                  restartMessage.type === "success"
+                    ? "alert-success"
+                    : "alert-error"
+                }`}
+                style={{ marginTop: "15px" }}
+              >
+                <pre
+                  style={{
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    fontFamily: "inherit",
+                    fontSize: "inherit",
+                  }}
+                >
+                  {restartMessage.text}
+                </pre>
+              </div>
+            )}
+
+            {serviceStatus.details && (
+              <details>
+                <summary style={{ cursor: "pointer", marginBottom: "10px" }}>
+                  View Service Details
+                </summary>
+                <pre
+                  style={{
+                    background: "#f8f9fa",
+                    padding: "10px",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    overflow: "auto",
+                    maxHeight: "200px",
+                  }}
+                >
+                  {serviceStatus.details}
+                </pre>
+              </details>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
+    );
+  }
 
-      {/* Service Status Card */}
-      {serviceStatus && (
-        <div className="card">
-          <h3>DHCP Service Status</h3>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "15px",
-              marginBottom: "15px",
-            }}
-          >
-            <div>
-              <strong>Service:</strong> {serviceStatus.service}
-            </div>
-            <div>
-              <strong>Status:</strong>{" "}
-              <span
-                style={{
-                  color: serviceStatus.active ? "#27ae60" : "#e74c3c",
-                  fontWeight: "bold",
-                }}
-              >
-                {serviceStatus.status}
-              </span>
-            </div>
-            <button
-              className="btn"
-              onClick={handleRestartClick}
-              disabled={restarting}
-            >
-              {restarting ? "Restarting..." : "Restart Service"}
-            </button>
-          </div>
-
-          {restartMessage && (
-            <div
-              className={`alert ${
-                restartMessage.type === "success"
-                  ? "alert-success"
-                  : "alert-error"
-              }`}
-              style={{ marginTop: "15px" }}
-            >
-              <pre
-                style={{
-                  margin: 0,
-                  whiteSpace: "pre-wrap",
-                  fontFamily: "inherit",
-                  fontSize: "inherit",
-                }}
-              >
-                {restartMessage.text}
-              </pre>
-            </div>
-          )}
-
-          {serviceStatus.details && (
-            <details>
-              <summary style={{ cursor: "pointer", marginBottom: "10px" }}>
-                View Service Details
-              </summary>
-              <pre
-                style={{
-                  background: "#f8f9fa",
-                  padding: "10px",
-                  borderRadius: "4px",
-                  fontSize: "12px",
-                  overflow: "auto",
-                  maxHeight: "200px",
-                }}
-              >
-                {serviceStatus.details}
-              </pre>
-            </details>
-          )}
-        </div>
-      )}
-
+  return (
+    <div>
       {/* Configuration Validation Card */}
       <div className="card">
         <div

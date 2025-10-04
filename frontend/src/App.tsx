@@ -28,6 +28,7 @@ function App() {
   const [editingZone, setEditingZone] = useState<DHCPZone | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [hostname, setHostname] = useState<string>("Loading...");
   const [appStatus, setAppStatus] = useState<{
     connected: boolean;
     error: string | null;
@@ -42,6 +43,10 @@ function App() {
       try {
         await apiService.healthCheck();
         setAppStatus({ connected: true, error: null });
+
+        // Fetch hostname
+        const hostnameData = await apiService.getSystemHostname();
+        setHostname(hostnameData.hostname);
       } catch (err) {
         if (err instanceof APIError) {
           setAppStatus({
@@ -130,6 +135,16 @@ function App() {
       <div className="header">
         <div className="container">
           <h1>ISC Web DHCP Configuration Manager</h1>
+          <p
+            style={{
+              margin: "10px 0 0 0",
+              fontSize: "14px",
+              opacity: 0.9,
+              fontWeight: "bold",
+            }}
+          >
+            Server: {hostname}
+          </p>
         </div>
       </div>
 
@@ -170,13 +185,13 @@ function App() {
             className={`tab ${activeTab === "global" ? "active" : ""}`}
             onClick={() => handleTabChange("global")}
           >
-            Global Settings
+            Global DHCP Configuration
           </button>
           <button
             className={`tab ${activeTab === "config" ? "active" : ""}`}
             onClick={() => handleTabChange("config")}
           >
-            Configuration
+            DHCP Service Status
           </button>
         </div>
 
@@ -284,11 +299,22 @@ function App() {
         )}
 
         {activeTab === "global" && (
-          <GlobalConfigForm refreshTrigger={refreshTrigger} />
+          <div>
+            <GlobalConfigForm refreshTrigger={refreshTrigger} />
+            <div style={{ marginTop: "30px" }}>
+              <ConfigViewer
+                refreshTrigger={refreshTrigger}
+                showOnlyServiceStatus={false}
+              />
+            </div>
+          </div>
         )}
 
         {activeTab === "config" && (
-          <ConfigViewer refreshTrigger={refreshTrigger} />
+          <ConfigViewer
+            refreshTrigger={refreshTrigger}
+            showOnlyServiceStatus={true}
+          />
         )}
 
         {/* Footer */}

@@ -270,6 +270,11 @@ class APIService {
     });
   }
 
+  // System endpoints
+  async getSystemHostname(): Promise<{ hostname: string }> {
+    return this.request<{ hostname: string }>("/system/hostname");
+  }
+
   // Utility methods
   async healthCheck(): Promise<DHCPHost[]> {
     return this.request<DHCPHost[]>("/hosts");

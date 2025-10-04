@@ -424,7 +424,6 @@ subnet $NETWORK netmask $NETMASK {
   option domain-name-servers 8.8.8.8, 8.8.4.4;
 }
 
-# Static host reservations will appear below
 DHCPEOF
     echo "dhcpd.conf created successfully"
 else
@@ -521,9 +520,9 @@ echo ""
 echo "=== Deployment Complete ==="
 echo ""
 echo "Services status:"
-systemctl status dhcp-manager --no-pager || true
+systemctl status dhcp-manager --no-pager --lines=0 || true
 echo ""
-systemctl status nginx --no-pager || true
+systemctl status nginx --no-pager --lines=0 || true
 echo ""
 echo "=========================================="
 echo "Access the application at: https://$(hostname -I | awk '{print $1}')"
