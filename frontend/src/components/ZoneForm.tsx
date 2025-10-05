@@ -180,16 +180,17 @@ const ZoneForm: React.FC<ZoneFormProps> = ({ editingZone, onSave, onCancel }) =>
           />
           {errors.zone_name && <span className="error-message">{errors.zone_name}</span>}
           {editingZone && (
-            <small style={{ color: '#666' }}>Zone name cannot be changed</small>
+            <small style={{ color: 'var(--text-muted)', transition: 'color 0.3s' }}>Zone name cannot be changed</small>
           )}
         </div>
 
         {!editingZone && (
           <div className="form-group" style={{
-            backgroundColor: '#f5f5f5',
+            backgroundColor: 'var(--bg-helper-section)',
             padding: '15px',
             borderRadius: '4px',
-            marginBottom: '20px'
+            marginBottom: '20px',
+            transition: 'background-color 0.3s',
           }}>
             <label htmlFor="helper" style={{ fontWeight: 'normal' }}>
               <strong>Helper:</strong> Generate reverse zone from network

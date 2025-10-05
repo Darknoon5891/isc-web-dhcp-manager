@@ -21,6 +21,8 @@ import apiService, {
   DHCPZone,
   APIError,
 } from "./services/api";
+import moonIcon from "./assets/moon.png";
+import sunIcon from "./assets/sun.png";
 
 type ActiveTab =
   | "hosts"
@@ -48,6 +50,20 @@ function App() {
   });
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
+  const [darkMode, setDarkMode] = useState(() => {
+    const saved = localStorage.getItem("darkMode");
+    return saved === "true";
+  });
+
+  // Apply dark mode class to body
+  useEffect(() => {
+    if (darkMode) {
+      document.body.classList.add("dark-mode");
+    } else {
+      document.body.classList.remove("dark-mode");
+    }
+    localStorage.setItem("darkMode", darkMode.toString());
+  }, [darkMode]);
 
   // Check authentication on app load
   useEffect(() => {
@@ -225,16 +241,28 @@ function App() {
                 Server: {hostname}
               </p>
             </div>
-            <button
-              className="btn"
-              onClick={handleLogout}
-              style={{
-                background: "#e74c3c",
-                marginLeft: "20px",
-              }}
-            >
-              Logout
-            </button>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+              <button
+                className="dark-mode-toggle"
+                onClick={() => setDarkMode(!darkMode)}
+                title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+              >
+                <img
+                  src={darkMode ? sunIcon : moonIcon}
+                  alt={darkMode ? "Light mode" : "Dark mode"}
+                  style={{ width: "24px", height: "24px" }}
+                />
+              </button>
+              <button
+                className="btn"
+                onClick={handleLogout}
+                style={{
+                  background: "#e74c3c",
+                }}
+              >
+                Logout
+              </button>
+            </div>
           </div>
         </div>
       </div>

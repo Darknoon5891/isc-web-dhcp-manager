@@ -287,18 +287,19 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
           >
             <div
               style={{
-                backgroundColor: "white",
+                backgroundColor: "var(--bg-modal)",
                 padding: "30px",
                 borderRadius: "8px",
                 maxWidth: "500px",
                 width: "90%",
                 boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                transition: "background-color 0.3s",
               }}
             >
               <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
                 Confirm ISC DHCP Service Restart
               </h3>
-              <p style={{ marginBottom: "20px", color: "#666" }}>
+              <p style={{ marginBottom: "20px", color: "var(--text-muted)", transition: "color 0.3s" }}>
                 Are you sure you want to restart the DHCP service? This may
                 temporarily interrupt network services.
               </p>
@@ -346,18 +347,19 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
           >
             <div
               style={{
-                backgroundColor: "white",
+                backgroundColor: "var(--bg-modal)",
                 padding: "30px",
                 borderRadius: "8px",
                 maxWidth: "500px",
                 width: "90%",
                 boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                transition: "background-color 0.3s",
               }}
             >
               <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
                 Confirm Nginx Service Reload
               </h3>
-              <p style={{ marginBottom: "20px", color: "#666" }}>
+              <p style={{ marginBottom: "20px", color: "var(--text-muted)", transition: "color 0.3s" }}>
                 Are you sure you want to reload the nginx service? The
                 configuration will be tested before reloading.
               </p>
@@ -405,18 +407,19 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
           >
             <div
               style={{
-                backgroundColor: "white",
+                backgroundColor: "var(--bg-modal)",
                 padding: "30px",
                 borderRadius: "8px",
                 maxWidth: "500px",
                 width: "90%",
                 boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+                transition: "background-color 0.3s",
               }}
             >
               <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
                 Confirm Backend Service Restart
               </h3>
-              <p style={{ marginBottom: "20px", color: "#666" }}>
+              <p style={{ marginBottom: "20px", color: "var(--text-muted)", transition: "color 0.3s" }}>
                 Are you sure you want to restart the backend service? This will
                 temporarily disconnect the web interface.
               </p>
@@ -510,12 +513,14 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
                 </summary>
                 <pre
                   style={{
-                    background: "#f8f9fa",
+                    background: "var(--bg-config-viewer)",
                     padding: "10px",
                     borderRadius: "4px",
                     fontSize: "12px",
                     overflow: "auto",
                     maxHeight: "200px",
+                    color: "var(--text-primary)",
+                    transition: "background-color 0.3s, color 0.3s",
                   }}
                 >
                   {serviceStatus.details}
@@ -589,12 +594,14 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
                 </summary>
                 <pre
                   style={{
-                    background: "#f8f9fa",
+                    background: "var(--bg-config-viewer)",
                     padding: "10px",
                     borderRadius: "4px",
                     fontSize: "12px",
                     overflow: "auto",
                     maxHeight: "200px",
+                    color: "var(--text-primary)",
+                    transition: "background-color 0.3s, color 0.3s",
                   }}
                 >
                   {backendServiceStatus.details}
@@ -669,12 +676,14 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
                 </summary>
                 <pre
                   style={{
-                    background: "#f8f9fa",
+                    background: "var(--bg-config-viewer)",
                     padding: "10px",
                     borderRadius: "4px",
                     fontSize: "12px",
                     overflow: "auto",
                     maxHeight: "200px",
+                    color: "var(--text-primary)",
+                    transition: "background-color 0.3s, color 0.3s",
                   }}
                 >
                   {nginxServiceStatus.details}

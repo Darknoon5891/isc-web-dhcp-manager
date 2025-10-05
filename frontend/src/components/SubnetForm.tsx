@@ -360,11 +360,12 @@ const SubnetForm: React.FC<SubnetFormProps> = ({ editingSubnet, onSave, onCancel
         {/* PTR Zone Auto-Creation Section */}
         {!editingSubnet && (
           <div style={{
-            backgroundColor: '#e3f2fd',
+            backgroundColor: 'var(--bg-highlight)',
             padding: '20px',
             borderRadius: '4px',
             marginTop: '30px',
-            border: '1px solid #90caf9'
+            border: '1px solid var(--border-highlight)',
+            transition: 'background-color 0.3s, border-color 0.3s',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: '15px' }}>
               <input

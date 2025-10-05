@@ -46,7 +46,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         justifyContent: "center",
         alignItems: "center",
         minHeight: "100vh",
-        backgroundColor: "#f5f5f5",
+        backgroundColor: "var(--bg-body)",
+        transition: "background-color 0.3s",
       }}
     >
       <div
@@ -62,7 +63,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
             marginTop: 0,
             marginBottom: "10px",
             textAlign: "center",
-            color: "#2c3e50",
+            color: "var(--text-heading)",
+            transition: "color 0.3s",
           }}
         >
           ISC DHCP Manager
@@ -70,9 +72,10 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         <p
           style={{
             textAlign: "center",
-            color: "#666",
+            color: "var(--text-muted)",
             marginBottom: "30px",
             fontSize: "14px",
+            transition: "color 0.3s",
           }}
         >
           Please enter your password to continue
@@ -93,7 +96,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 marginBottom: "8px",
                 fontWeight: "bold",
                 fontSize: "14px",
-                color: "#2c3e50",
+                color: "var(--text-heading)",
+                transition: "color 0.3s",
               }}
             >
               Password
@@ -109,9 +113,12 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 width: "100%",
                 padding: "12px",
                 fontSize: "14px",
-                border: "1px solid #ddd",
+                border: "1px solid var(--border-input)",
                 borderRadius: "4px",
                 boxSizing: "border-box",
+                backgroundColor: "var(--bg-input)",
+                color: "var(--text-primary)",
+                transition: "background-color 0.3s, color 0.3s, border-color 0.3s",
               }}
               placeholder="Enter your password"
             />
@@ -135,10 +142,11 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           style={{
             marginTop: "30px",
             padding: "15px",
-            background: "#fff3cd",
-            border: "1px solid #ffc107",
+            background: "var(--bg-warning)",
+            border: "1px solid var(--border-warning)",
             borderRadius: "4px",
             fontSize: "13px",
+            transition: "background-color 0.3s, border-color 0.3s",
           }}
         >
           <strong>Note:</strong> If you've forgotten your password, you can

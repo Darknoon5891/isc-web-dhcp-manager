@@ -127,17 +127,8 @@ def create_app():
     # Setup logging
     setup_logging(app)
 
-    # Log startup information
-    app.logger.info("="*60)
-    app.logger.info("ISC Web DHCP Configuration Manager starting")
-    app.logger.info(f"Log level: {app.config.get('LOG_LEVEL', 'INFO')}")
-    app.logger.info(f"Log path: {app.config.get('LOGGING_PATH', '/var/log/isc-web-dhcp-manager')}")
-    app.logger.info(f"DHCP config path: {app.config['DHCP_CONFIG_PATH']}")
-    app.logger.info(f"DHCP backup directory: {app.config['DHCP_BACKUP_DIR']}")
-    app.logger.info(f"API prefix: {app.config['API_PREFIX']}")
-    app.logger.info(f"CORS origins: {app.config.get('CORS_ORIGINS', '*')}")
-    app.logger.info(f"Service restart allowed: {app.config.get('ALLOW_SERVICE_RESTART', True)}")
-    app.logger.info("="*60)
+    # Log minimal worker initialization info
+    app.logger.debug(f"Worker process {os.getpid()} initialized")
 
     # Initialize DHCP parser
     dhcp_parser = DHCPParser(app.config['DHCP_CONFIG_PATH'])

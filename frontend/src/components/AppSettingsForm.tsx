@@ -307,9 +307,10 @@ const AppSettingsForm: React.FC<AppSettingsFormProps> = ({
         style={{
           marginTop: "30px",
           padding: "20px",
-          background: "#f8f9fa",
-          border: "1px solid #dee2e6",
+          background: "var(--bg-info-section)",
+          border: "1px solid var(--border-info)",
           borderRadius: "4px",
+          transition: "background-color 0.3s, border-color 0.3s",
         }}
       >
         <h3 style={{ marginTop: 0, marginBottom: "15px" }}>Change Password</h3>
@@ -435,9 +436,10 @@ const AppSettingsForm: React.FC<AppSettingsFormProps> = ({
         style={{
           marginTop: "30px",
           padding: "20px",
-          background: "#f8f9fa",
-          border: "1px solid #dee2e6",
+          background: "var(--bg-info-section)",
+          border: "1px solid var(--border-info)",
           borderRadius: "4px",
+          transition: "background-color 0.3s, border-color 0.3s",
         }}
       >
         <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
@@ -677,10 +679,11 @@ const AppSettingsForm: React.FC<AppSettingsFormProps> = ({
           style={{
             marginTop: "30px",
             padding: "15px",
-            background: "#fff3cd",
-            border: "1px solid #ffc107",
+            background: "var(--bg-warning)",
+            border: "1px solid var(--border-warning)",
             borderRadius: "4px",
             fontSize: "14px",
+            transition: "background-color 0.3s, border-color 0.3s",
           }}
         >
           <strong>Important:</strong> Changes to application settings may

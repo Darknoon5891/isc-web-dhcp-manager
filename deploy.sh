@@ -220,7 +220,7 @@ WorkingDirectory=/opt/dhcp-manager/backend
 Environment="PATH=/opt/dhcp-manager/backend/venv/bin"
 Environment="SECRET_KEY=$SECRET_KEY"
 Environment="FLASK_ENV=production"
-ExecStart=/opt/dhcp-manager/backend/venv/bin/gunicorn --workers 3 --bind 127.0.0.1:5000 --timeout 120 --access-logfile - --error-logfile - "app:create_app()"
+ExecStart=/opt/dhcp-manager/backend/venv/bin/gunicorn -c /opt/dhcp-manager/backend/gunicorn.conf.py "app:create_app()"
 Restart=always
 RestartSec=3
 
