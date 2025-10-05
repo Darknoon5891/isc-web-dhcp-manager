@@ -544,6 +544,7 @@ const GlobalConfigForm: React.FC<GlobalConfigFormProps> = ({
             padding: "15px",
             backgroundColor: "#fff3cd",
             borderRadius: "4px",
+            color: "#000",
             border: "1px solid #ffc107",
           }}
         >
