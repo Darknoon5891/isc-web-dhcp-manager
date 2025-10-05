@@ -50,6 +50,14 @@
       "section": "DHCP Configuration",
       "order": 12
     },
+    "DHCP_LEASES_PATH": {
+      "type": "string",
+      "format": "path",
+      "description": "Absolute path to ISC DHCP leases file",
+      "default": "/var/lib/dhcp/dhcpd.leases",
+      "section": "DHCP Configuration",
+      "order": 13
+    },
     "ALLOW_SERVICE_RESTART": {
       "type": "boolean",
       "description": "Allow restarting DHCP service through web interface",

@@ -91,7 +91,7 @@ class DHCPZone:
         """Convert to DHCP configuration format"""
         # Zone names must end with a dot in DHCP config
         zone_name_with_dot = self.zone_name if self.zone_name.endswith('.') else f"{self.zone_name}."
-        lines = [f'zone "{zone_name_with_dot}" {{']
+        lines = [f'zone {zone_name_with_dot} {{']
 
         # Add primary server
         lines.append(f"    primary {self.primary};")
@@ -287,55 +287,16 @@ class DHCPParser:
             raise PermissionError(f"Permission denied reading {self.config_path}")
     
     def write_config(self, content: str) -> None:
-        """Write new configuration content atomically"""
+        """Write new configuration content directly to file"""
         try:
-            # Get the directory and filename
-            config_dir = os.path.dirname(self.config_path)
-            config_file = os.path.basename(self.config_path)
+            # Write directly to the config file
+            # This preserves the original file ownership and permissions
+            with open(self.config_path, 'w') as f:
+                f.write(content)
+                f.flush()
+                os.fsync(f.fileno())
 
-            # Create temporary file in the same directory for atomic rename
-            # Using same directory ensures we're on the same filesystem
-            fd, temp_path = tempfile.mkstemp(
-                dir=config_dir,
-                prefix=f'.{config_file}.',
-                suffix='.tmp',
-                text=True
-            )
-
-            try:
-                # Write to temporary file
-                with os.fdopen(fd, 'w') as f:
-                    f.write(content)
-                    # Sync to disk before closing
-                    f.flush()
-                    os.fsync(f.fileno())
-
-                # Get original file permissions if it exists
-                if os.path.exists(self.config_path):
-                    stat_info = os.stat(self.config_path)
-                    os.chmod(temp_path, stat_info.st_mode)
-                    try:
-                        # Preserve original ownership (UID and GID)
-                        os.chown(temp_path, stat_info.st_uid, stat_info.st_gid)
-                        logger.debug(f"Preserved DHCP config ownership: uid={stat_info.st_uid}, gid={stat_info.st_gid}")
-                    except (PermissionError, OSError) as e:
-                        # chown may fail if not running as root, that's ok
-                        logger.warning(f"Failed to preserve ownership on DHCP config file (uid={stat_info.st_uid}, gid={stat_info.st_gid}): {str(e)}")
-                        logger.warning("DHCP config file may have incorrect ownership - check permissions manually")
-
-                # Atomic rename (overwrites existing file)
-                os.replace(temp_path, self.config_path)
-                logger.info(f"Wrote DHCP config file: {len(content)} bytes")
-
-            except Exception as e:
-                # Clean up temp file on error
-                if os.path.exists(temp_path):
-                    try:
-                        os.unlink(temp_path)
-                    except OSError:
-                        pass
-                logger.error(f"Failed to write DHCP config atomically: {str(e)}")
-                raise
+            logger.info(f"Wrote DHCP config file: {len(content)} bytes")
 
         except PermissionError:
             logger.error(f"Permission denied writing to DHCP config: {self.config_path}")
@@ -899,10 +860,11 @@ class DHCPParser:
         while i < len(lines):
             line = lines[i].strip()
 
-            # Look for zone declaration start: zone "name" {
-            zone_match = re.match(r'zone\s+"([^"]+)"\s*\{', line)
+            # Look for zone declaration start: zone name { or zone "name" {
+            zone_match = re.match(r'zone\s+(?:"([^"]+)"|([^\s{]+))\s*\{', line)
             if zone_match:
-                zone_name = zone_match.group(1).rstrip('.')  # Remove trailing dot for storage
+                # Get zone name from either quoted (group 1) or unquoted (group 2)
+                zone_name = (zone_match.group(1) or zone_match.group(2)).rstrip('.')  # Remove trailing dot for storage
                 primary = None
                 key_name = None
                 secondary = []

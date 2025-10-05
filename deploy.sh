@@ -11,9 +11,11 @@ if [ "$(id -u)" -ne 0 ]; then
    exit 1
 fi
 
-APP_SOURCE="/app"
-CONFIG_SOURCE="/app/config"
-FRONTEND_SOURCE="/app/frontend"
+# Auto-detect script directory
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+APP_SOURCE="${SCRIPT_DIR}"
+CONFIG_SOURCE="${APP_SOURCE}/config"
+FRONTEND_SOURCE="${APP_SOURCE}/frontend"
 WEB_ROOT="/var/www/dhcp-manager"
 BACKEND_USER="dhcp-manager"
 PYTHON_VERSION="python3"
@@ -267,6 +269,9 @@ DHCP_BACKUP_DIR=/etc/isc-web-dhcp-manager/backups
 
 # DHCP Service Name
 DHCP_SERVICE_NAME=isc-dhcp-server
+
+# DHCP Leases File Path
+DHCP_LEASES_PATH=/var/lib/dhcp/dhcpd.leases
 
 # Application Settings
 ALLOW_SERVICE_RESTART=true

@@ -10,6 +10,7 @@ import SubnetList from "./components/SubnetList";
 import SubnetForm from "./components/SubnetForm";
 import ZoneList from "./components/ZoneList";
 import ZoneForm from "./components/ZoneForm";
+import LeaseList from "./components/LeaseList";
 import GlobalConfigForm from "./components/GlobalConfigForm";
 import ConfigViewer from "./components/ConfigViewer";
 import AppSettingsForm from "./components/AppSettingsForm";
@@ -25,6 +26,7 @@ type ActiveTab =
   | "hosts"
   | "subnets"
   | "zones"
+  | "leases"
   | "global"
   | "config"
   | "appsettings";
@@ -271,6 +273,12 @@ function App() {
             PTR Zones
           </button>
           <button
+            className={`tab ${activeTab === "leases" ? "active" : ""}`}
+            onClick={() => handleTabChange("leases")}
+          >
+            Leases
+          </button>
+          <button
             className={`tab ${activeTab === "global" ? "active" : ""}`}
             onClick={() => handleTabChange("global")}
           >
@@ -391,6 +399,10 @@ function App() {
               />
             )}
           </div>
+        )}
+
+        {activeTab === "leases" && (
+          <LeaseList refreshTrigger={refreshTrigger} />
         )}
 
         {activeTab === "global" && (

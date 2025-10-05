@@ -24,6 +24,16 @@ export interface DHCPZone {
   secondary?: string[];
 }
 
+export interface DHCPLease {
+  ip: string;
+  mac: string;
+  starts: string;
+  ends: string;
+  state: string;
+  hostname?: string;
+  binding_state: string;
+}
+
 export interface DHCPGlobalConfig {
   default_lease_time: number;
   max_lease_time: number;
@@ -297,6 +307,15 @@ class APIService {
         method: "DELETE",
       }
     );
+  }
+
+  // Lease viewing endpoints
+  async getLeases(): Promise<DHCPLease[]> {
+    return this.request<DHCPLease[]>("/leases");
+  }
+
+  async getActiveLeases(): Promise<DHCPLease[]> {
+    return this.request<DHCPLease[]>("/leases/active");
   }
 
   // Global configuration endpoints

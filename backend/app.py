@@ -15,6 +15,7 @@ from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone, DHCPGlobalCo
 from config_manager import ConfigManager
 from tls_manager import get_certificate_info, validate_certificate_file
 from auth_manager import hash_password, verify_password, generate_token, verify_token
+from lease_parser import LeaseParser, DHCPLease
 
 
 def setup_logging(app):
@@ -1042,6 +1043,79 @@ def create_app():
         except Exception as e:
             app.logger.error(f"Failed to delete zone {zone_name}: {str(e)}")
             return jsonify({'error': 'Failed to delete zone', 'message': str(e)}), 500
+
+    # Lease viewing endpoints
+    @app.route(f"{app.config['API_PREFIX']}/leases", methods=['GET'])
+    @require_auth
+    def get_leases():
+        """Get all DHCP leases"""
+        try:
+            leases_path = app.config.get('DHCP_LEASES_PATH', '/var/lib/dhcp/dhcpd.leases')
+            lease_parser = LeaseParser(leases_path)
+            leases = lease_parser.get_all_leases()
+
+            # Convert dataclasses to dicts
+            leases_dict = [
+                {
+                    'ip': lease.ip,
+                    'mac': lease.mac,
+                    'starts': lease.starts,
+                    'ends': lease.ends,
+                    'state': lease.state,
+                    'hostname': lease.hostname,
+                    'binding_state': lease.binding_state
+                }
+                for lease in leases
+            ]
+
+            app.logger.debug(f"Retrieved {len(leases_dict)} leases")
+            return jsonify(leases_dict)
+
+        except FileNotFoundError:
+            app.logger.error(f"Leases file not found: {app.config.get('DHCP_LEASES_PATH')}")
+            return jsonify({'error': 'Leases file not found'}), 404
+        except PermissionError:
+            app.logger.error("Permission denied accessing leases file")
+            return jsonify({'error': 'Permission denied accessing leases file'}), 403
+        except Exception as e:
+            app.logger.error(f"Failed to read leases: {str(e)}")
+            return jsonify({'error': 'Failed to read leases', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/leases/active", methods=['GET'])
+    @require_auth
+    def get_active_leases():
+        """Get only active DHCP leases"""
+        try:
+            leases_path = app.config.get('DHCP_LEASES_PATH', '/var/lib/dhcp/dhcpd.leases')
+            lease_parser = LeaseParser(leases_path)
+            leases = lease_parser.get_active_leases()
+
+            # Convert dataclasses to dicts
+            leases_dict = [
+                {
+                    'ip': lease.ip,
+                    'mac': lease.mac,
+                    'starts': lease.starts,
+                    'ends': lease.ends,
+                    'state': lease.state,
+                    'hostname': lease.hostname,
+                    'binding_state': lease.binding_state
+                }
+                for lease in leases
+            ]
+
+            app.logger.debug(f"Retrieved {len(leases_dict)} active leases")
+            return jsonify(leases_dict)
+
+        except FileNotFoundError:
+            app.logger.error(f"Leases file not found: {app.config.get('DHCP_LEASES_PATH')}")
+            return jsonify({'error': 'Leases file not found'}), 404
+        except PermissionError:
+            app.logger.error("Permission denied accessing leases file")
+            return jsonify({'error': 'Permission denied accessing leases file'}), 403
+        except Exception as e:
+            app.logger.error(f"Failed to read active leases: {str(e)}")
+            return jsonify({'error': 'Failed to read active leases', 'message': str(e)}), 500
 
     # Global configuration endpoints
     @app.route(f"{app.config['API_PREFIX']}/global-config", methods=['GET'])

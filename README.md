@@ -1,91 +1,105 @@
 # ISC Web DHCP Configuration Manager
 
-A web-based interface for managing ISC DHCP Server configuration files. Provides an easy way to manage DHCP host reservations, subnets, DNS zones, and global settings without manually editing the `/etc/dhcp/dhcpd.conf` file.
+A production-ready web-based interface for managing ISC DHCP Server configuration. Provides comprehensive management of DHCP hosts, subnets, zones, leases, and global configuration with TLS/HTTPS support and JWT authentication.
+
+Built and tested on **Debian 12 (amd64)** with **Python 3.11**
 
 ## Features
 
-- **Host Reservations**: Add, edit, and delete DHCP static host reservations with MAC and IP address bindings
-- **Subnet Management**: Configure DHCP subnets with IP ranges, routers, DNS servers, and other options
+### DHCP Management
+
+- **Host Reservations**: Add, edit, delete, and search static DHCP host reservations with MAC and IP bindings
+- **Subnet Management**: Configure DHCP subnets with IP ranges, routers, DNS servers, and custom options
 - **PTR Zone Management**: Configure dynamic DNS reverse zones for automatic PTR record updates
-- **Global DHCP Configuration**: Manage lease times, authoritative mode, DDNS settings, NTP servers, and ping checking
-- **App Settings Management**: Web-based configuration editor for application settings stored in `/etc/isc-web-dhcp-manager/config.conf`
-- **Configuration Validation**: Validate DHCP configuration syntax before applying changes
-- **Service Control**: View DHCP service status and restart from the web interface
-- **Backup Management**: Automatic backups created before each configuration change
-- **Configuration Viewing**: View the raw DHCP configuration file
-- **Input Validation**: Client and server-side validation for all configuration parameters
+- **Global Configuration**: Manage lease times, authoritative mode, DDNS settings, NTP servers, and ping checking
+- **Lease Viewing**: Real-time view of active and expired leases with search and 30-second auto-refresh
+
+### System Management
+
+- **Service Control**: Start, stop, and restart ISC DHCP Server and Nginx from the web interface
+- **Service Status**: Real-time monitoring of ISC DHCP Server and Nginx with color-coded status badges
+- **Configuration Validation**: Test DHCP configuration syntax before applying changes
+- **Backup Management**: Automatic backups before configuration changes, viewable backup list
+- **Configuration Viewer**: View raw DHCP configuration file with syntax highlighting
+
+### Security & Administration
+
+- **JWT Authentication**: Secure token-based login system with 24-hour expiration
+- **Password Management**: Change password from web interface (automatically restarts backend)
+- **TLS/HTTPS**: Self-signed or custom certificate support with certificate information display
+- **App Configuration**: Web-based settings editor with schema validation and masked sensitive values
 
 ## Quick Start
 
-<b>Built and tested on Debian 12 (amd64) - Using Python 3.11</b>
+### Automated Deployment (Recommended)
 
-### Automated Deployment (Recommended for Production)
-
-The easiest way to deploy this application is using the included deployment script:
+The deployment script provides complete automated installation:
 
 1. **Clone the repository:**
 
    ```bash
    git clone <repository-url>
-   cd isc-dhcp-rontend
+   cd isc-web-dhcp-manager
    ```
 
-2. **Run the deployment script:**
+2. **Run the deployment script as root:**
    ```bash
-   sudo bash deploy.sh
+   sudo ./deploy.sh
    ```
 
-The deployment script will automatically:
+The script automatically:
 
-- Install system dependencies (Python 3.11, nginx, isc-dhcp-server)
-- Create a dedicated `dhcp-manager` system user
-- Set up the backend with gunicorn and systemd service
-- Deploy pre-built frontend to nginx
-- **Generate self-signed SSL certificate** (10-year validity with FQDN, hostname, and localhost in SAN)
-- **Configure nginx with HTTPS** (TLS 1.2/1.3, security headers, HTTP→HTTPS redirect)
-- Set up proper file permissions for `/etc/dhcp/dhcpd.conf`
-- Create application configuration in `/etc/isc-web-dhcp-manager/`
-- Configure sudoers for service management
-- **Intelligently detect and configure DHCP**:
+- Detects its directory for flexible deployment locations
+- Installs system dependencies (Python 3.11, Nginx, ISC DHCP Server, Node.js)
+- Creates dedicated `dhcp-manager` system user with restricted permissions
+- Sets up backend with Gunicorn WSGI server and systemd service
+- Builds and deploys React frontend to `/var/www/dhcp-manager`
+- Generates 10-year self-signed TLS certificate with proper SANs
+- Configures Nginx with HTTPS (TLS 1.2/1.3), security headers, and HTTP→HTTPS redirect
+- Sets up passwordless sudo for specific service management commands
+- Creates application configuration in `/opt/dhcp-manager/config/`
+- Intelligently handles DHCP configuration:
   - Preserves existing configs with host declarations
-  - Recreates default/invalid configs from fresh ISC DHCP installs
+  - Recreates default/invalid configs from fresh installs
   - Auto-detects network interface and subnet
-  - Automatically restarts DHCP service when config is recreated
+  - Configures DHCP range `.100-.200` by default
+- Generates default password (`admin`) in bcrypt-hashed format
+- Starts all services and verifies status
 
-After deployment completes, the application will be accessible at `https://<your-server-ip>`
+**Post-Deployment:**
 
-**Important Notes:**
+1. Access the web interface at `https://<server-ip>` (accept self-signed certificate warning)
+2. Login with password: `admin`
+3. **Immediately change the default password** in App Settings tab
+4. Optionally configure custom TLS certificate paths in App Settings
+5. Review and adjust DHCP configuration as needed
 
-- The script expects the application files to be in `/app` directory. Adjust `APP_SOURCE`, `CONFIG_SOURCE`, and `FRONTEND_SOURCE` variables in `deploy.sh` if your path differs.
-- Frontend is pre-built and included in the repository - no Node.js required on the server
-- The script will auto-detect your network interface and configure DHCP subnet automatically
-- DHCP range is set to `.100 - .200` by default (configurable in the script)
-- **Self-signed SSL certificate**: Browsers will show security warnings on first access (click "Advanced" → "Proceed")
-- Application settings are stored in `/etc/isc-web-dhcp-manager/config.conf` with schema validation
-- Configuration schema is located at `/etc/isc-web-dhcp-manager/config_schema.json`
-- The script intelligently handles ISC DHCP configuration scenarios:
-  - Fresh install with no config → creates new config
-  - Fresh install with default config (commented out) → creates new config
-  - Existing config with hosts → preserves user configuration
-  - Reinstall scenarios → preserves or recreates based on content analysis
+**Important:**
+
+- Application runs as dedicated `dhcp-manager` user (non-root)
+- Config stored in `/opt/dhcp-manager/config/config.json`
+- Backups stored in `/opt/dhcp-manager/backups/`
+- Frontend served from `/var/www/dhcp-manager`
+- Backend runs on `127.0.0.1:5000` (proxied by Nginx)
+- Logs: `sudo journalctl -u dhcp-manager -f`
 
 ### Manual Development Setup
 
-For development and testing purposes:
+For local development and testing:
 
 #### Backend Setup
 
-1. Navigate to the backend directory:
+1. Navigate to backend directory:
 
    ```bash
    cd backend
    ```
 
-2. Create and activate a Python virtual environment:
+2. Create and activate virtual environment:
 
    ```bash
    python3 -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   source venv/bin/activate  # Windows: venv\Scripts\activate
    ```
 
 3. Install dependencies:
@@ -94,16 +108,15 @@ For development and testing purposes:
    pip install -r requirements.txt
    ```
 
-4. Run the Flask application:
+4. Run Flask development server:
    ```bash
    python app.py
    ```
-
-The backend will start on `http://localhost:5000`.
+   Backend runs on `http://localhost:5000`
 
 #### Frontend Setup
 
-1. Navigate to the frontend directory:
+1. Navigate to frontend directory:
 
    ```bash
    cd frontend
@@ -115,273 +128,343 @@ The backend will start on `http://localhost:5000`.
    npm install
    ```
 
-3. Start the development server:
+3. Start development server:
    ```bash
    npm start
    ```
-
-The frontend will start on `http://localhost:3000` and automatically proxy API requests to the Flask backend.
+   Frontend runs on `http://localhost:3000` and proxies API requests to port 5000
 
 ## Project Structure
 
 ```
-isc-dhcp-rontend/
+isc-web-dhcp-manager/
 ├── backend/
-│   ├── app.py              # Main Flask application
-│   ├── dhcp_parser.py      # DHCP configuration parser
-│   ├── config.py           # Application configuration loader
-│   ├── config_manager.py   # App settings manager
-│   └── requirements.txt    # Python dependencies
+│   ├── app.py                 # Main Flask application with all API routes
+│   ├── dhcp_parser.py         # DHCP config parser (hosts, subnets, zones, global)
+│   ├── lease_parser.py        # DHCP lease file parser
+│   ├── config_manager.py      # App configuration management
+│   ├── auth_manager.py        # JWT authentication and password hashing
+│   ├── tls_manager.py         # TLS certificate management
+│   └── requirements.txt       # Python dependencies
 ├── config/
-│   └── config_schema.json  # Application settings schema (deployed to /etc)
+│   └── config_schema.json     # Application settings schema with validation
 ├── frontend/
-│   ├── build/              # Pre-built production frontend (for ease of deployment)
 │   ├── public/
-│   │   └── index.html      # HTML template
+│   │   └── index.html         # HTML template
 │   ├── src/
-│   │   ├── App.tsx         # Main React component
-│   │   ├── components/     # React components
-│   │   │   ├── HostList.tsx
-│   │   │   ├── HostForm.tsx
-│   │   │   ├── SubnetList.tsx
-│   │   │   ├── SubnetForm.tsx
-│   │   │   ├── ZoneList.tsx
-│   │   │   ├── ZoneForm.tsx
-│   │   │   ├── GlobalConfigForm.tsx
-│   │   │   ├── AppSettingsForm.tsx
-│   │   │   └── ConfigViewer.tsx
+│   │   ├── App.tsx            # Main app with tab navigation and auth
+│   │   ├── components/        # React components
+│   │   │   ├── HostList.tsx           # Host reservations table
+│   │   │   ├── HostForm.tsx           # Add/edit host form
+│   │   │   ├── SubnetList.tsx         # Subnets table
+│   │   │   ├── SubnetForm.tsx         # Add/edit subnet form
+│   │   │   ├── ZoneList.tsx           # PTR zones table
+│   │   │   ├── ZoneForm.tsx           # Add/edit zone form
+│   │   │   ├── LeaseList.tsx          # Active/all leases viewer
+│   │   │   ├── GlobalConfigForm.tsx   # Global DHCP settings
+│   │   │   ├── ConfigViewer.tsx       # Service status and raw config
+│   │   │   ├── AppSettingsForm.tsx    # App configuration editor
+│   │   │   └── Login.tsx              # Login page
 │   │   └── services/
-│   │       └── api.tsx     # API service layer
-│   ├── package.json        # Node.js dependencies
-│   └── tsconfig.json       # TypeScript configuration
-├── deploy.sh               # Automated deployment script
-└── README.md               # This file
+│   │       └── api.tsx        # API service with all endpoints
+│   ├── package.json           # Node.js dependencies
+│   └── tsconfig.json          # TypeScript configuration
+├── deploy.sh                  # Automated deployment script
+└── README.md                  # This file
 ```
-
-## Configuration
-
-### Application Configuration
-
-The application uses a configuration file at `/etc/isc-web-dhcp-manager/config.conf`.
-All configuration options are validated against the schema in `/etc/isc-web-dhcp-manager/config_schema.json`. You can edit these settings through the "App Settings" tab in the web interface.
-
-### Production Mode (Manual Configuration)
-
-**Note:** For automated deployment, see the "Automated Deployment" section in Quick Start above.
-
-For manual production deployment on a Linux server:
-
-#### 2. File Permissions
-
-The Flask application needs read/write access to the DHCP configuration:
-
-```bash
-# Create backup directory
-sudo mkdir -p /etc/dhcp/backups
-
-# Set ownership (owner must remain root, change group only)
-sudo chown root:dhcp-manager /etc/dhcp/dhcpd.conf
-sudo chmod 660 /etc/dhcp/dhcpd.conf
-
-# Allow directory access for temp file creation (atomic writes)
-sudo chown root:dhcp-manager /etc/dhcp
-sudo chmod 775 /etc/dhcp
-
-# Set backup directory ownership
-sudo chown dhcp-manager:dhcp-manager /etc/dhcp/backups
-sudo chmod 770 /etc/dhcp/backups
-```
-
-#### 3. Sudo Permissions for Service Restart
-
-Create a sudoers file to allow service restarts without password:
-
-```bash
-sudo visudo -f /etc/sudoers.d/dhcp-manager
-```
-
-Add these lines (replace `flask-user` with your application user):
-
-```
-flask-user ALL=(ALL) NOPASSWD: /bin/systemctl restart isc-dhcp-server
-flask-user ALL=(ALL) NOPASSWD: /bin/systemctl status isc-dhcp-server
-flask-user ALL=(ALL) NOPASSWD: /bin/systemctl is-active isc-dhcp-server
-```
-
-Save and set proper permissions:
-
-```bash
-sudo chmod 440 /etc/sudoers.d/dhcp-manager
-```
-
-#### 4. WSGI Server (Production)
-
-Use Gunicorn instead of Flask development server:
-
-```bash
-# Install gunicorn
-pip install gunicorn
-
-# Run with gunicorn
-gunicorn -w 4 -b 0.0.0.0:5000 'app:create_app()'
-```
-
-#### 5. Systemd Service (Optional)
-
-Create `/etc/systemd/system/dhcp-manager.service`:
-
-```ini
-[Unit]
-Description=ISC Web DHCP Configuration Manager
-After=network.target
-
-[Service]
-User=flask-user
-Group=flask-user
-WorkingDirectory=/path/to/isc-dhcp-rontend/backend
-Environment="PATH=/path/to/isc-dhcp-rontend/backend/venv/bin"
-EnvironmentFile=/path/to/isc-dhcp-rontend/.env
-ExecStart=/path/to/isc-dhcp-rontend/backend/venv/bin/gunicorn -w 4 -b 127.0.0.1:5000 'app:create_app()'
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Enable and start:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable dhcp-manager
-sudo systemctl start dhcp-manager
-```
-
-#### 6. Reverse Proxy (Nginx)
-
-Configure Nginx to proxy requests:
-
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    location /api {
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-    }
-
-    location / {
-        root /path/to/isc-dhcp-rontend/frontend/build;
-        try_files $uri /index.html;
-    }
-}
-```
-
-#### 7. Build Frontend for Production
-
-```bash
-cd frontend
-npm run build
-```
-
-The built files will be in `frontend/build/` directory.
 
 ## API Endpoints
+
+### Authentication
+
+- `POST /api/auth/login` - Authenticate and receive JWT token
+- `POST /api/auth/verify` - Verify token validity
+- `POST /api/auth/change-password` - Change password (auto-restarts backend)
 
 ### Host Reservations
 
 - `GET /api/hosts` - List all host reservations
-- `GET /api/hosts/{hostname}` - Get specific host reservation
+- `GET /api/hosts/{hostname}` - Get specific host
 - `POST /api/hosts` - Add new host reservation
-- `PUT /api/hosts/{hostname}` - Update existing host
-- `DELETE /api/hosts/{hostname}` - Delete host reservation
+- `PUT /api/hosts/{hostname}` - Update host
+- `DELETE /api/hosts/{hostname}` - Delete host
 
 ### Subnets
 
 - `GET /api/subnets` - List all subnets
 - `GET /api/subnets/{network}` - Get specific subnet
 - `POST /api/subnets` - Add new subnet
-- `PUT /api/subnets/{network}` - Update existing subnet
+- `PUT /api/subnets/{network}` - Update subnet
 - `DELETE /api/subnets/{network}` - Delete subnet
 
 ### PTR Zones
 
-- `GET /api/zones` - List all PTR zones
+- `GET /api/zones` - List all zones
 - `GET /api/zones/{zone_name}` - Get specific zone
 - `POST /api/zones` - Add new zone
-- `PUT /api/zones/{zone_name}` - Update existing zone
+- `PUT /api/zones/{zone_name}` - Update zone
 - `DELETE /api/zones/{zone_name}` - Delete zone
+
+### Leases
+
+- `GET /api/leases` - Get all leases (active, expired, free)
+- `GET /api/leases/active` - Get only active leases
 
 ### Global Configuration
 
-- `GET /api/global-config` - Get global DHCP settings
-- `PUT /api/global-config` - Update global DHCP settings
-
-### Application Settings
-
-- `GET /api/app-config` - Get application configuration (sensitive values masked)
-- `GET /api/app-config/schema` - Get configuration schema
-- `PUT /api/app-config` - Update application configuration
+- `GET /api/global-config` - Get global DHCP configuration
+- `PUT /api/global-config` - Update global configuration
 
 ### Service Management
 
-- `GET /api/config` - Get raw DHCP configuration content
+- `GET /api/service/status/{service}` - Get service status (isc-dhcp-server, nginx, dhcp-manager)
+- `POST /api/restart/{service}` - Restart service with validation
+- `GET /api/config` - Get raw dhcpd.conf content
 - `POST /api/validate` - Validate DHCP configuration
-- `POST /api/restart` - Restart DHCP service
-- `GET /api/service/status` - Get DHCP service status
 - `GET /api/backups` - List configuration backups
+
+### App Configuration
+
+- `GET /api/app-config` - Get app configuration (sensitive values masked)
+- `GET /api/app-config/schema` - Get configuration schema
+- `PUT /api/app-config` - Update app configuration
+
+### TLS Management
+
+- `GET /api/tls/certificate-info` - Get current certificate information
 
 ### System
 
 - `GET /api/system/hostname` - Get server hostname
-- `GET /api/` - Health check endpoint
 
-## Security Considerations
+## Configuration
 
-- **File Permissions**: Ensure proper access to `/etc/dhcp/dhcpd.conf`
-- **Input Validation**: All inputs are validated on both client and server
-- **Backups**: Configuration backups are created before each modification
-- **Service Control**: Service restart requires appropriate system permissions
+### Application Configuration File
+
+Located at `/opt/dhcp-manager/config/config.json` (created by deploy.sh)
+
+Key settings:
+
+- `DHCP_CONF_PATH`: Path to dhcpd.conf (default: `/etc/dhcp/dhcpd.conf`)
+- `DHCP_LEASES_PATH`: Path to lease file (default: `/var/lib/dhcp/dhcpd.leases`)
+- `BACKUP_DIR`: Configuration backup directory (default: `/opt/dhcp-manager/backups`)
+- `PASSWORD_FILE`: Bcrypt password hash file (default: `/opt/dhcp-manager/config/password.hash`)
+- `TLS_CERT_PATH`: TLS certificate path (default: `/etc/nginx/ssl/dhcp-manager.crt`)
+- `TLS_KEY_PATH`: TLS key path (default: `/etc/nginx/ssl/dhcp-manager.key`)
+- `LOG_LEVEL`: Application log level (default: `INFO`)
+
+Edit via web interface (App Settings tab) or manually with JSON editor.
+
+### Security Configuration
+
+**Sudo Permissions** (configured in `/etc/sudoers.d/dhcp-manager`):
+
+```bash
+dhcp-manager ALL=(ALL) NOPASSWD: /bin/systemctl start isc-dhcp-server
+dhcp-manager ALL=(ALL) NOPASSWD: /bin/systemctl stop isc-dhcp-server
+dhcp-manager ALL=(ALL) NOPASSWD: /bin/systemctl restart isc-dhcp-server
+dhcp-manager ALL=(ALL) NOPASSWD: /bin/systemctl status isc-dhcp-server
+dhcp-manager ALL=(ALL) NOPASSWD: /bin/systemctl restart dhcp-manager.service
+dhcp-manager ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t
+dhcp-manager ALL=(ALL) NOPASSWD: /bin/systemctl reload nginx
+dhcp-manager ALL=(ALL) NOPASSWD: /bin/systemctl restart nginx
+dhcp-manager ALL=(ALL) NOPASSWD: /bin/systemctl status nginx
+dhcp-manager ALL=(ALL) NOPASSWD: /usr/sbin/dhcpd -t -cf /etc/dhcp/dhcpd.conf
+```
+
+**Authentication:**
+
+- JWT tokens with 24-hour expiration
+- Bcrypt password hashing with salt
+- Automatic logout on 401 responses
+- Token stored in browser localStorage
+
+**TLS/HTTPS:**
+
+- Self-signed certificate generated by deploy.sh (10-year validity)
+- TLS 1.2 and 1.3 enabled
+- Security headers configured in Nginx
+- HTTP automatically redirects to HTTPS
+
+## Monitoring and Logs
+
+### Service Logs
+
+```bash
+# Backend application logs
+sudo journalctl -u dhcp-manager -f
+
+# DHCP server logs
+sudo journalctl -u isc-dhcp-server -f
+
+# Nginx access logs
+sudo tail -f /var/log/nginx/access.log
+
+# Nginx error logs
+sudo tail -f /var/log/nginx/error.log
+```
+
+### Service Status
+
+```bash
+# Check all services
+sudo systemctl status dhcp-manager
+sudo systemctl status isc-dhcp-server
+sudo systemctl status nginx
+
+# Or view in web interface under "ISC DHCP Service Status" tab
+```
 
 ## Troubleshooting
 
-### Backend Issues
+### Common Issues
 
-- Ensure Python 3.8+ is installed
-- Check that all dependencies are installed: `pip install -r requirements.txt`
-- Verify file permissions for configuration access
-- Check Flask application logs for detailed error messages
+**DHCP Service Won't Start**
 
-### Frontend Issues
+- Validate config: `sudo dhcpd -t -cf /etc/dhcp/dhcpd.conf`
+- Check logs: `sudo journalctl -u isc-dhcp-server -xe`
+- Restore from backup if needed: `/opt/dhcp-manager/backups/`
 
-- Ensure Node.js 16+ is installed
-- Clear npm cache: `npm cache clean --force`
-- Delete `node_modules` and reinstall: `rm -rf node_modules && npm install`
-- Check browser console for JavaScript errors
+**Backend Connection Failed**
 
-### DHCP Service Issues
+- Verify service running: `sudo systemctl status dhcp-manager`
+- Check port 5000: `sudo ss -tlnp | grep 5000`
+- Review backend logs: `sudo journalctl -u dhcp-manager -f`
 
-- Validate configuration before restarting service
-- Check DHCP service logs: `sudo journalctl -u isc-dhcp-server -f`
-- Ensure no syntax errors in configuration file
-- Verify network interface configuration
+**401 Unauthorized After Login**
+
+- Password may have changed - use new password
+- Token expired - logout and login again
+- Check password file: `/opt/dhcp-manager/config/password.hash`
+
+**TLS Certificate Warnings**
+
+- Expected with self-signed certificate
+- Click "Advanced" → "Proceed to site" in browser
+- Or install custom certificate and update paths in App Settings
+
+**Permission Denied Errors**
+
+- Verify sudo config: `sudo -l -U dhcp-manager`
+- Check file ownership: `ls -la /opt/dhcp-manager`
+- Ensure dhcp-manager user can read DHCP config and leases
+
+**Service Restart After Password Change**
+
+- Password changes automatically restart backend service
+- Wait 5-10 seconds for service to restart
+- Refresh page and login with new password
+
+### Validation Errors
+
+Always validate DHCP configuration before restarting:
+
+1. Click "Validate Configuration" button
+2. Review any syntax errors
+3. Fix errors before restarting service
+4. Invalid config will prevent DHCP service from starting
+
+## Production Deployment
+
+### Updates and Upgrades
+
+To update the application:
+
+```bash
+cd /path/to/isc-web-dhcp-manager
+git pull
+sudo ./deploy.sh
+```
+
+The deployment script:
+
+- Preserves existing configuration files
+- Preserves password hashes
+- Keeps backups intact
+- Rebuilds frontend
+- Restarts services automatically
+
+### Custom TLS Certificates
+
+To use custom certificates:
+
+1. Login to web interface
+2. Navigate to App Settings tab
+3. Update `TLS_CERT_PATH` and `TLS_KEY_PATH` fields
+4. Save settings
+5. Restart Nginx from "ISC DHCP Service Status" tab
+
+### Firewall Configuration
+
+Ensure port 443 is accessible:
+
+```bash
+# UFW
+sudo ufw allow 443/tcp
+
+# iptables
+sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+```
+
+## Security Best Practices
+
+1. **Change default password immediately** after deployment
+2. **Use custom TLS certificates** for production (not self-signed)
+3. **Regularly review backups** in `/opt/dhcp-manager/backups/`
+4. **Monitor service logs** for unauthorized access attempts
+5. **Keep system updated**: `sudo apt update && sudo apt upgrade`
+6. **Restrict network access** to management interface if possible
+7. **Review sudo permissions** periodically
+8. **Enable firewall** and allow only necessary ports
 
 ## Development
 
+### Local Development Workflow
+
+1. Make changes to backend (Python) or frontend (TypeScript/React)
+2. Backend auto-reloads in debug mode (`python app.py`)
+3. Frontend hot-reloads automatically (`npm start`)
+4. Test changes thoroughly before deploying
+5. Validate DHCP config changes don't break service
+
 ### Adding New Features
 
-1. Backend changes: Modify `app.py` for new endpoints, `dhcp_parser.py` for config logic
-2. Frontend changes: Add components in `src/components/`, update API in `src/services/api.tsx`
-3. Update validation rules in both frontend and backend as needed
+1. **Backend**: Add routes in `app.py`, parser logic in `dhcp_parser.py`
+2. **Frontend**: Create components in `src/components/`, update API in `src/services/api.tsx`
+3. **Validation**: Add validation in both frontend (client-side) and backend (server-side)
+4. **Documentation**: Update CLAUDE.md with technical details
 
-### Testing
+### Building for Production
 
-- Backend: Add unit tests for parser logic and API endpoints
-- Frontend: Test components with various input combinations
-- Integration: Test complete workflows (add/edit/delete hosts)
+```bash
+cd frontend
+npm run build
+```
+
+Built files output to `frontend/build/` directory
+
+## Architecture
+
+- **Backend**: Flask + Gunicorn WSGI server
+- **Frontend**: React SPA with TypeScript
+- **Web Server**: Nginx (reverse proxy + TLS termination)
+- **Authentication**: JWT tokens with bcrypt password hashing
+- **Configuration**: Direct file manipulation with automatic backups
+- **Service Management**: systemd with passwordless sudo for specific commands
+
+See `CLAUDE.md` for detailed technical documentation.
 
 ## License
 
 This project is developed as a utility tool for managing DHCP configurations. Use at your own discretion and ensure proper backups before making changes to production systems.
+
+## Support
+
+- Review logs: `sudo journalctl -u dhcp-manager -f`
+- Check backups: `/opt/dhcp-manager/backups/`
+- ISC DHCP documentation: https://www.isc.org/dhcp/
+- Configuration schema: `/opt/dhcp-manager/config/config_schema.json`
+
+## Version
+
+**V1.0** - Production ready with complete DHCP management, authentication, TLS support, and automated deployment.
