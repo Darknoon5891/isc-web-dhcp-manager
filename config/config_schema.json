@@ -82,6 +82,15 @@
       "section": "Application Settings",
       "order": 23
     },
+    "MAX_CONTENT_LENGTH": {
+      "type": "integer",
+      "minimum": 1024,
+      "maximum": 104857600,
+      "description": "Maximum request body size in bytes (1KB to 100MB)",
+      "default": "1048576",
+      "section": "Application Settings",
+      "order": 24
+    },
     "CORS_ORIGINS": {
       "type": "string",
       "description": "Allowed CORS origins (comma-separated, or * for all)",
@@ -104,6 +113,62 @@
       "default": "/var/log/isc-web-dhcp-manager",
       "section": "Logging",
       "order": 41
+    },
+    "TLS_CERTIFICATE_PATH": {
+      "type": "string",
+      "format": "path",
+      "description": "Path to TLS certificate file (.crt)",
+      "default": "/etc/nginx/ssl/dhcp-manager.crt",
+      "section": "TLS Configuration",
+      "order": 50
+    },
+    "TLS_PRIVATE_KEY_PATH": {
+      "type": "string",
+      "format": "path",
+      "description": "Path to TLS private key file (.key)",
+      "default": "/etc/nginx/ssl/dhcp-manager.key",
+      "section": "TLS Configuration",
+      "order": 51,
+      "sensitive": true
+    },
+    "TLS_ENABLED": {
+      "type": "boolean",
+      "description": "Enable HTTPS/TLS for web interface",
+      "default": "true",
+      "section": "TLS Configuration",
+      "order": 52
+    },
+    "AUTH_ENABLED": {
+      "type": "boolean",
+      "description": "Enable authentication for web interface",
+      "default": "false",
+      "section": "Authentication",
+      "order": 60
+    },
+    "AUTH_PASSWORD_HASH": {
+      "type": "string",
+      "description": "Bcrypt password hash for authentication",
+      "default": "",
+      "section": "Authentication",
+      "order": 61,
+      "sensitive": true
+    },
+    "AUTH_TOKEN_EXPIRY_HOURS": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 168,
+      "description": "Authentication token validity period in hours",
+      "default": "24",
+      "section": "Authentication",
+      "order": 62
+    },
+    "API_PREFIX": {
+      "type": "string",
+      "description": "API route prefix",
+      "default": "/api",
+      "readOnly": true,
+      "section": "Flask Environment",
+      "order": 4
     }
   },
   "required": [
@@ -114,6 +179,7 @@
     "DHCP_SERVICE_NAME",
     "MAX_HOSTNAME_LENGTH",
     "MAX_BACKUPS",
-    "CORS_ORIGINS"
+    "CORS_ORIGINS",
+    "API_PREFIX"
   ]
 }

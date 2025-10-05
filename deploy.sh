@@ -18,8 +18,11 @@ WEB_ROOT="/var/www/dhcp-manager"
 BACKEND_USER="dhcp-manager"
 PYTHON_VERSION="python3"
 
-# SSL Configuration
+# TLS/SSL Configuration
 CERT_DAYS=3650  # 10 years
+TLS_CERT_PATH="/etc/nginx/ssl/dhcp-manager.crt"
+TLS_KEY_PATH="/etc/nginx/ssl/dhcp-manager.key"
+TLS_DIR="/etc/nginx/ssl"
 
 # Check if ISC DHCP Server is already installed before we install packages
 # This helps us determine if the config file is from a previous installation
@@ -66,12 +69,14 @@ echo "Step 6: Generating self-signed SSL certificate..."
 # Get server FQDN and hostname
 SERVER_FQDN=$(hostname -f)
 SERVER_HOSTNAME=$(hostname -s)
+SERVER_IP=$(hostname -I | awk '{print $1}')
 
 echo "Server FQDN: $SERVER_FQDN"
 echo "Server Hostname: $SERVER_HOSTNAME"
+echo "Server IP: $SERVER_IP"
 
-# Create SSL directory
-mkdir -p /etc/nginx/ssl
+# Create TLS directory
+mkdir -p "$TLS_DIR"
 
 # Create OpenSSL config for SAN (Subject Alternative Names)
 cat > /tmp/openssl-san.cnf <<EOF
@@ -83,9 +88,6 @@ distinguished_name = dn
 req_extensions = req_ext
 
 [dn]
-C=US
-ST=SomeState
-L=SomeCity
 O=DHCP Manager
 CN=$SERVER_FQDN
 
@@ -96,27 +98,28 @@ subjectAltName = @alt_names
 DNS.1 = $SERVER_FQDN
 DNS.2 = $SERVER_HOSTNAME
 DNS.3 = localhost
-IP.1 = 127.0.0.1
+IP.1 = $SERVER_IP
+IP.2 = 127.0.0.1
 EOF
 
 # Generate self-signed certificate with SAN
 openssl req -x509 -nodes -days $CERT_DAYS \
     -newkey rsa:2048 \
-    -keyout /etc/nginx/ssl/dhcp-manager.key \
-    -out /etc/nginx/ssl/dhcp-manager.crt \
+    -keyout "$TLS_KEY_PATH" \
+    -out "$TLS_CERT_PATH" \
     -config /tmp/openssl-san.cnf \
     -extensions req_ext 2>/dev/null
 
 # Set proper permissions
-chmod 600 /etc/nginx/ssl/dhcp-manager.key
-chmod 644 /etc/nginx/ssl/dhcp-manager.crt
+chmod 600 "$TLS_KEY_PATH"
+chmod 644 "$TLS_CERT_PATH"
 
 # Clean up temp config
 rm -f /tmp/openssl-san.cnf
 
 echo "SSL certificate generated:"
-echo "  Certificate: /etc/nginx/ssl/dhcp-manager.crt"
-echo "  Private Key: /etc/nginx/ssl/dhcp-manager.key"
+echo "  Certificate: $TLS_CERT_PATH"
+echo "  Private Key: $TLS_KEY_PATH"
 echo "  Common Name: $SERVER_FQDN"
 echo "  SAN: $SERVER_FQDN, $SERVER_HOSTNAME, localhost"
 echo ""
@@ -125,14 +128,14 @@ echo "Browsers will show security warnings on first access."
 echo ""
 
 echo "Step 7: Configuring nginx..."
-cat > /etc/nginx/sites-available/dhcp-manager <<'EOF'
+cat > /etc/nginx/sites-available/dhcp-manager <<EOF
 # HTTP server - redirect to HTTPS
 server {
     listen 80;
     server_name _;
 
     # Redirect all HTTP traffic to HTTPS
-    return 301 https://$host$request_uri;
+    return 301 https://\$host\$request_uri;
 }
 
 # HTTPS server
@@ -141,8 +144,8 @@ server {
     server_name _;
 
     # SSL Certificate (self-signed)
-    ssl_certificate /etc/nginx/ssl/dhcp-manager.crt;
-    ssl_certificate_key /etc/nginx/ssl/dhcp-manager.key;
+    ssl_certificate $TLS_CERT_PATH;
+    ssl_certificate_key $TLS_KEY_PATH;
 
     # SSL Security Settings
     ssl_protocols TLSv1.2 TLSv1.3;
@@ -165,16 +168,16 @@ server {
     index index.html;
 
     location / {
-        try_files $uri $uri/ /index.html;
+        try_files \$uri \$uri/ /index.html;
     }
 
     location /api {
         proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header X-Forwarded-Host \$host;
         proxy_redirect off;
 
         # Timeouts for API requests
@@ -192,8 +195,15 @@ systemctl reload nginx
 
 echo ""
 echo "Step 8: Configuring backend systemd service..."
+
 # Generate random secret key
 SECRET_KEY=$(openssl rand -hex 32)
+
+# Generate random password for authentication (using venv's bcrypt)
+echo "Generating authentication password..."
+DEFAULT_PASSWORD=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
+DEFAULT_PASSWORD_HASH=$(sudo -u "$BACKEND_USER" bash -c "source /opt/dhcp-manager/backend/venv/bin/activate && python3 -c \"import bcrypt; print(bcrypt.hashpw(b'$DEFAULT_PASSWORD', bcrypt.gensalt(rounds=12)).decode('utf-8'))\"")
+
 
 cat > /etc/systemd/system/dhcp-manager.service <<EOF
 [Unit]
@@ -263,13 +273,25 @@ ALLOW_SERVICE_RESTART=true
 MAX_HOSTNAME_LENGTH=255
 MAX_BACKUPS=10
 REQUIRE_SUDO=true
+MAX_CONTENT_LENGTH=1048576
 
 # CORS Settings
-CORS_ORIGINS=*
+CORS_ORIGINS=https://$SERVER_FQDN,https://$SERVER_IP,https://$SERVER_HOSTNAME,https://localhost
 
 # Logging
 LOG_LEVEL=INFO
 LOGGING_PATH=/var/log/isc-web-dhcp-manager
+
+
+# TLS Configuration
+TLS_CERTIFICATE_PATH=$TLS_CERT_PATH
+TLS_PRIVATE_KEY_PATH=$TLS_KEY_PATH
+TLS_ENABLED=true
+
+# Authentication
+AUTH_ENABLED=true
+AUTH_PASSWORD_HASH=$DEFAULT_PASSWORD_HASH
+AUTH_TOKEN_EXPIRY_HOURS=24
 
 # Debug Mode
 FLASK_DEBUG=false
@@ -490,6 +512,13 @@ $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active isc-dhcp-server
 $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart dhcp-manager.service
 $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl status dhcp-manager.service
 $BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active dhcp-manager.service
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl reload nginx.service
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl reload nginx
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl status nginx.service
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl status nginx
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active nginx.service
+$BACKEND_USER ALL=(ALL) NOPASSWD: /bin/systemctl is-active nginx
+$BACKEND_USER ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t
 $BACKEND_USER ALL=(ALL) NOPASSWD: /usr/sbin/dhcpd -t -cf /etc/dhcp/dhcpd.conf
 EOF
 chmod 440 /etc/sudoers.d/dhcp-manager
@@ -539,6 +568,9 @@ systemctl status dhcp-manager --no-pager --lines=0 || true
 echo ""
 systemctl status nginx --no-pager --lines=0 || true
 echo ""
+echo "Restarting DHCP Manager backend to apply all changes..."
+systemctl restart dhcp-manager
+echo ""
 echo "=========================================="
 echo "Access the application at: https://$(hostname -I | awk '{print $1}')"
 echo "  or: https://$(hostname -f)"
@@ -549,13 +581,26 @@ echo "  Your browser will show a security warning on first access"
 echo "  This is expected. Click 'Advanced' and 'Proceed' to continue"
 echo ""
 echo "SSL Certificate Details:"
-echo "  Certificate: /etc/nginx/ssl/dhcp-manager.crt"
-echo "  Private Key: /etc/nginx/ssl/dhcp-manager.key"
+echo "  Certificate: $TLS_CERT_PATH"
+echo "  Private Key: $TLS_KEY_PATH"
 echo "  Common Name: $(hostname -f)"
 echo "  Validity: 10 years"
+echo ""
+echo "=========================================="
+echo "AUTHENTICATION CREDENTIALS"
+echo "=========================================="
+echo "  Username: (none - password only)"
+echo "  Password: $DEFAULT_PASSWORD"
+echo ""
+echo "IMPORTANT: Change this password immediately after login!"
+echo "  - Go to App Settings > Authentication"
+echo "  - Or re-run this deployment script to generate a new password"
+echo "=========================================="
+echo ""
+
 echo ""
 echo "Useful commands:"
 echo "  - View backend logs: journalctl -u dhcp-manager -f"
 echo "  - View DHCP logs: journalctl -u isc-dhcp-server -f"
 echo "  - Restart backend: systemctl restart dhcp-manager"
-echo "  - View certificate: openssl x509 -in /etc/nginx/ssl/dhcp-manager.crt -text -noout"
+echo "  - View certificate: openssl x509 -in $TLS_CERT_PATH -text -noout"

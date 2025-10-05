@@ -141,8 +141,10 @@ class ConfigManager:
                     os.chmod(temp_path, stat_info.st_mode)
                     try:
                         os.chown(temp_path, stat_info.st_uid, stat_info.st_gid)
-                    except (PermissionError, OSError):
-                        pass
+                        logger.debug(f"Preserved ownership: uid={stat_info.st_uid}, gid={stat_info.st_gid}")
+                    except (PermissionError, OSError) as e:
+                        logger.warning(f"Failed to preserve ownership on config file (uid={stat_info.st_uid}, gid={stat_info.st_gid}): {str(e)}")
+                        logger.warning("Config file may have incorrect ownership - check permissions manually")
 
                 # Atomic rename
                 os.replace(temp_path, self.config_path)

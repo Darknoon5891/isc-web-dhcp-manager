@@ -62,6 +62,37 @@ export interface BackupInfo {
   size: number;
 }
 
+export interface TLSCertificateInfo {
+  subject: string;
+  issuer: string;
+  valid_from: string;
+  valid_to: string;
+  days_until_expiry: number;
+  san_dns: string[];
+  san_ip: string[];
+  fingerprint: string;
+  is_self_signed: boolean;
+}
+
+export interface TLSValidationResult {
+  valid: boolean;
+  message: string;
+}
+
+export interface NginxReloadResult {
+  success: boolean;
+  message: string;
+}
+
+export interface LoginResponse {
+  token: string;
+  expires_at: string;
+}
+
+export interface VerifyResponse {
+  valid: boolean;
+}
+
 class APIError extends Error {
   constructor(message: string, public status?: number) {
     super(message);
@@ -86,9 +117,13 @@ class APIService {
   ): Promise<T> {
     const url = `${this.baseURL}/api${endpoint}`;
 
+    // Get token from localStorage
+    const token = localStorage.getItem("auth_token");
+
     const config: RequestInit = {
       headers: {
         "Content-Type": "application/json",
+        ...(token && { Authorization: `Bearer ${token}` }),
         ...options.headers,
       },
       ...options,
@@ -98,6 +133,14 @@ class APIService {
       const response = await fetch(url, config);
 
       if (!response.ok) {
+        // Handle 401 Unauthorized - clear token and trigger re-login
+        // Skip reload for login endpoint to allow error message to be displayed
+        if (response.status === 401 && !endpoint.includes("/auth/login")) {
+          localStorage.removeItem("auth_token");
+          // Reload page to show login screen
+          window.location.reload();
+        }
+
         const errorData = await response.json().catch(() => ({}));
         throw new APIError(
           errorData.message || errorData.error || `HTTP ${response.status}`,
@@ -289,6 +332,47 @@ class APIService {
       method: "PUT",
       body: JSON.stringify(config),
     });
+  }
+
+  // TLS certificate management endpoints
+  async getTLSCertificateInfo(): Promise<TLSCertificateInfo> {
+    return this.request<TLSCertificateInfo>("/tls/certificate-info");
+  }
+
+  async validateTLSCertificate(cert_path?: string): Promise<TLSValidationResult> {
+    return this.request<TLSValidationResult>("/tls/validate-certificate", {
+      method: "POST",
+      body: JSON.stringify({ cert_path }),
+    });
+  }
+
+  // Authentication endpoints
+  async login(password: string): Promise<LoginResponse> {
+    return this.request<LoginResponse>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+  }
+
+  async verifyToken(): Promise<VerifyResponse> {
+    return this.request<VerifyResponse>("/auth/verify", {
+      method: "POST",
+    });
+  }
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({
+        current_password: currentPassword,
+        new_password: newPassword,
+      }),
+    });
+  }
+
+  logout(): void {
+    localStorage.removeItem("auth_token");
+    window.location.reload();
   }
 
   // Utility methods

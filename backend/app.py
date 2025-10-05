@@ -8,10 +8,13 @@ import subprocess
 import socket
 import logging
 from logging.handlers import RotatingFileHandler
+from functools import wraps
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dhcp_parser import DHCPParser, DHCPHost, DHCPSubnet, DHCPZone, DHCPGlobalConfig
 from config_manager import ConfigManager
+from tls_manager import get_certificate_info, validate_certificate_file
+from auth_manager import hash_password, verify_password, generate_token, verify_token
 
 
 def setup_logging(app):
@@ -89,11 +92,23 @@ def create_app():
     if 'REQUIRE_SUDO' in app.config:
         app.config['REQUIRE_SUDO'] = app.config['REQUIRE_SUDO'].lower() == 'true'
 
+    if 'TLS_ENABLED' in app.config:
+        app.config['TLS_ENABLED'] = app.config['TLS_ENABLED'].lower() == 'true'
+
+    if 'AUTH_ENABLED' in app.config:
+        app.config['AUTH_ENABLED'] = app.config['AUTH_ENABLED'].lower() == 'true'
+
     if 'MAX_HOSTNAME_LENGTH' in app.config:
         app.config['MAX_HOSTNAME_LENGTH'] = int(app.config['MAX_HOSTNAME_LENGTH'])
 
     if 'MAX_BACKUPS' in app.config:
         app.config['MAX_BACKUPS'] = int(app.config['MAX_BACKUPS'])
+
+    if 'AUTH_TOKEN_EXPIRY_HOURS' in app.config:
+        app.config['AUTH_TOKEN_EXPIRY_HOURS'] = int(app.config['AUTH_TOKEN_EXPIRY_HOURS'])
+
+    if 'MAX_CONTENT_LENGTH' in app.config:
+        app.config['MAX_CONTENT_LENGTH'] = int(app.config['MAX_CONTENT_LENGTH'])
 
     # Parse CORS_ORIGINS into list
     if 'CORS_ORIGINS' in app.config:
@@ -125,7 +140,34 @@ def create_app():
 
     # Initialize DHCP parser
     dhcp_parser = DHCPParser(app.config['DHCP_CONFIG_PATH'])
-    
+
+    # Add security headers to all responses
+    @app.after_request
+    def add_security_headers(response):
+        """Add security headers to all API responses"""
+        # Prevent MIME type sniffing
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+
+        # Prevent clickjacking (API shouldn't be framed)
+        response.headers['X-Frame-Options'] = 'DENY'
+
+        # Enable XSS protection
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+
+        # Referrer policy
+        response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+
+        # Content Security Policy for API (restrictive)
+        response.headers['Content-Security-Policy'] = "default-src 'none'; frame-ancestors 'none'"
+
+        # Prevent caching of sensitive data
+        if request.path.startswith(app.config.get('API_PREFIX', '/api')):
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, private'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+
+        return response
+
     @app.errorhandler(400)
     def bad_request(error):
         app.logger.warning(f"Bad request: {request.method} {request.path} - {str(error)}")
@@ -140,7 +182,161 @@ def create_app():
     def internal_error(error):
         app.logger.error(f"Internal server error: {request.method} {request.path} - {str(error)}", exc_info=True)
         return jsonify({'error': 'Internal server error', 'message': str(error)}), 500
-    
+
+    # Authentication decorator
+    def require_auth(f):
+        """Decorator to require authentication for endpoints"""
+        @wraps(f)
+        def decorated_function(*args, **kwargs):
+            # Skip authentication if AUTH_ENABLED is false
+            if not app.config.get('AUTH_ENABLED', False):
+                return f(*args, **kwargs)
+
+            # Get token from Authorization header
+            auth_header = request.headers.get('Authorization')
+            if not auth_header:
+                app.logger.warning(f"Unauthorized access attempt to {request.path} - no token provided")
+                return jsonify({'error': 'Authentication required', 'message': 'No authorization token provided'}), 401
+
+            # Extract token (format: "Bearer <token>")
+            parts = auth_header.split()
+            if len(parts) != 2 or parts[0].lower() != 'bearer':
+                app.logger.warning(f"Unauthorized access attempt to {request.path} - invalid token format")
+                return jsonify({'error': 'Authentication required', 'message': 'Invalid authorization header format'}), 401
+
+            token = parts[1]
+
+            # Verify token
+            is_valid, error_message = verify_token(token, app.config['SECRET_KEY'])
+            if not is_valid:
+                app.logger.warning(f"Unauthorized access attempt to {request.path} - {error_message}")
+                return jsonify({'error': 'Authentication required', 'message': error_message}), 401
+
+            return f(*args, **kwargs)
+        return decorated_function
+
+    # Authentication endpoints (not protected)
+    @app.route(f"{app.config['API_PREFIX']}/auth/login", methods=['POST'])
+    def login():
+        """Authenticate and receive JWT token"""
+        try:
+            data = request.get_json()
+            if not data or 'password' not in data:
+                app.logger.warning("Login attempt with missing password")
+                return jsonify({'error': 'Password required'}), 400
+
+            password = data['password']
+
+            # Check if authentication is enabled
+            if not app.config.get('AUTH_ENABLED', False):
+                app.logger.warning("Login attempt when authentication is disabled")
+                return jsonify({'error': 'Authentication is not enabled'}), 400
+
+            # Get password hash from config
+            password_hash = app.config.get('AUTH_PASSWORD_HASH', '')
+            if not password_hash:
+                app.logger.error("Authentication enabled but no password hash configured")
+                return jsonify({'error': 'Authentication not properly configured'}), 500
+
+            # Verify password
+            if not verify_password(password, password_hash):
+                app.logger.warning("Failed login attempt - incorrect password")
+                return jsonify({'error': 'Invalid password'}), 401
+
+            # Generate token
+            expiry_hours = app.config.get('AUTH_TOKEN_EXPIRY_HOURS', 24)
+            token, expires_at = generate_token(app.config['SECRET_KEY'], expiry_hours)
+
+            app.logger.info("Successful login")
+            return jsonify({
+                'token': token,
+                'expires_at': expires_at
+            })
+
+        except Exception as e:
+            app.logger.error(f"Login error: {str(e)}")
+            return jsonify({'error': 'Login failed', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/auth/verify", methods=['POST'])
+    def verify_auth():
+        """Verify if authentication token is valid"""
+        try:
+            # Get token from Authorization header
+            auth_header = request.headers.get('Authorization')
+            if not auth_header:
+                return jsonify({'valid': False})
+
+            parts = auth_header.split()
+            if len(parts) != 2 or parts[0].lower() != 'bearer':
+                return jsonify({'valid': False})
+
+            token = parts[1]
+
+            # Verify token
+            is_valid, _ = verify_token(token, app.config['SECRET_KEY'])
+
+            app.logger.debug(f"Token verification: {is_valid}")
+            return jsonify({'valid': is_valid})
+
+        except Exception as e:
+            app.logger.error(f"Token verification error: {str(e)}")
+            return jsonify({'valid': False})
+
+    @app.route(f"{app.config['API_PREFIX']}/auth/change-password", methods=['POST'])
+    @require_auth
+    def change_password():
+        """Change authentication password"""
+        try:
+            data = request.get_json()
+            if not data or 'current_password' not in data or 'new_password' not in data:
+                app.logger.warning("Password change attempt with missing fields")
+                return jsonify({'error': 'Current password and new password required'}), 400
+
+            current_password = data['current_password']
+            new_password = data['new_password']
+
+            # Validate new password
+            if len(new_password) < 8:
+                app.logger.warning("Password change attempt with password too short")
+                return jsonify({'error': 'New password must be at least 8 characters'}), 400
+
+            # Get current password hash
+            current_hash = app.config.get('AUTH_PASSWORD_HASH', '')
+            if not current_hash:
+                app.logger.error("Password change attempt but no hash configured")
+                return jsonify({'error': 'Authentication not properly configured'}), 500
+
+            # Verify current password
+            if not verify_password(current_password, current_hash):
+                app.logger.warning("Password change attempt with incorrect current password")
+                return jsonify({'error': 'Current password is incorrect'}), 401
+
+            # Generate new hash
+            new_hash = hash_password(new_password)
+
+            # Update config
+            config = config_manager.read_config()
+            config['AUTH_PASSWORD_HASH'] = new_hash
+            config_manager.write_config(config)
+
+            app.logger.info("Password changed successfully, initiating backend service restart")
+
+            # Restart backend service asynchronously to apply new password
+            # We can't wait for response because the service will kill itself
+            subprocess.Popen(
+                ['/usr/bin/sudo', '/bin/systemctl', 'restart', 'dhcp-manager.service'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+
+            return jsonify({
+                'message': 'Password changed successfully. Backend service is restarting to apply changes.'
+            })
+
+        except Exception as e:
+            app.logger.error(f"Password change error: {str(e)}")
+            return jsonify({'error': 'Failed to change password', 'message': str(e)}), 500
+
     @app.route('/')
     @app.route(f"{app.config['API_PREFIX']}/")
     def index():
@@ -153,6 +349,7 @@ def create_app():
         })
 
     @app.route(f"{app.config['API_PREFIX']}/system/hostname", methods=['GET'])
+    @require_auth
     def get_system_hostname():
         """Get the server hostname"""
         try:
@@ -164,6 +361,7 @@ def create_app():
             return jsonify({'error': 'Failed to get hostname', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/hosts", methods=['GET'])
+    @require_auth
     def get_hosts():
         """Get all DHCP host reservations"""
         try:
@@ -178,9 +376,15 @@ def create_app():
             return jsonify({'error': 'Failed to read hosts', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/hosts/<hostname>", methods=['GET'])
+    @require_auth
     def get_host(hostname):
         """Get a specific host reservation"""
         try:
+            # Validate hostname parameter
+            if not dhcp_parser.validate_hostname(hostname):
+                app.logger.warning(f"Invalid hostname in URL: {hostname}")
+                return jsonify({'error': 'Invalid hostname format'}), 400
+
             host = dhcp_parser.get_host(hostname)
             if host:
                 app.logger.debug(f"Retrieved host: {hostname}")
@@ -195,6 +399,7 @@ def create_app():
             return jsonify({'error': 'Failed to read host', 'message': str(e)}), 500
     
     @app.route(f"{app.config['API_PREFIX']}/hosts", methods=['POST'])
+    @require_auth
     def add_host():
         """Add a new host reservation"""
         try:
@@ -234,9 +439,15 @@ def create_app():
             return jsonify({'error': 'Failed to add host', 'message': str(e)}), 500
     
     @app.route(f"{app.config['API_PREFIX']}/hosts/<hostname>", methods=['PUT'])
+    @require_auth
     def update_host(hostname):
         """Update an existing host reservation"""
         try:
+            # Validate hostname parameter
+            if not dhcp_parser.validate_hostname(hostname):
+                app.logger.warning(f"Invalid hostname in URL: {hostname}")
+                return jsonify({'error': 'Invalid hostname format'}), 400
+
             data = request.get_json()
             if not data:
                 app.logger.warning(f"Update host request for {hostname} with no JSON data")
@@ -273,9 +484,15 @@ def create_app():
             return jsonify({'error': 'Failed to update host', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/hosts/<hostname>", methods=['DELETE'])
+    @require_auth
     def delete_host(hostname):
         """Delete a host reservation"""
         try:
+            # Validate hostname parameter
+            if not dhcp_parser.validate_hostname(hostname):
+                app.logger.warning(f"Invalid hostname in URL: {hostname}")
+                return jsonify({'error': 'Invalid hostname format'}), 400
+
             dhcp_parser.delete_host(hostname)
             app.logger.info(f"Deleted host reservation: {hostname}")
             return jsonify({'message': f'Host {hostname} deleted successfully'})
@@ -291,6 +508,7 @@ def create_app():
             return jsonify({'error': 'Failed to delete host', 'message': str(e)}), 500
     
     @app.route(f"{app.config['API_PREFIX']}/config", methods=['GET'])
+    @require_auth
     def get_config_content():
         """Get the raw DHCP configuration content"""
         try:
@@ -305,6 +523,7 @@ def create_app():
             return jsonify({'error': 'Failed to read configuration', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/validate", methods=['POST'])
+    @require_auth
     def validate_config():
         """Validate the current DHCP configuration"""
         try:
@@ -319,15 +538,16 @@ def create_app():
             return jsonify({'error': 'Failed to validate configuration', 'message': str(e)}), 500
     
     @app.route(f"{app.config['API_PREFIX']}/restart/<service_name>", methods=['POST'])
+    @require_auth
     def restart_service(service_name):
-        """Restart a service (DHCP or backend)"""
+        """Restart a service (DHCP, backend, or nginx)"""
         if not app.config['ALLOW_SERVICE_RESTART']:
             app.logger.warning(f"Service restart attempt blocked - restart disabled: {service_name}")
             return jsonify({'error': 'Service restart is disabled'}), 403
 
         try:
-            # Validate service name - only allow these two services
-            allowed_services = ['isc-dhcp-server', 'dhcp-manager']
+            # Validate service name - only allow these services
+            allowed_services = ['isc-dhcp-server', 'dhcp-manager', 'nginx']
             if service_name not in allowed_services:
                 app.logger.warning(f"Invalid service restart request: {service_name}")
                 return jsonify({
@@ -337,7 +557,7 @@ def create_app():
 
             full_service_name = f'{service_name}.service' if not service_name.endswith('.service') else service_name
 
-            # Only validate DHCP config before restarting DHCP service
+            # Validate DHCP config before restarting DHCP service
             if service_name == 'isc-dhcp-server':
                 is_valid, validation_message = dhcp_parser.validate_config()
                 if not is_valid:
@@ -345,6 +565,24 @@ def create_app():
                     return jsonify({
                         'error': 'Configuration validation failed',
                         'message': validation_message
+                    }), 400
+
+            # Validate nginx config before reloading nginx
+            if service_name == 'nginx':
+                app.logger.info("Testing nginx configuration before reload")
+                test_result = subprocess.run(
+                    ['/usr/bin/sudo', '/usr/sbin/nginx', '-t'],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+
+                if test_result.returncode != 0:
+                    error_msg = test_result.stderr.strip() if test_result.stderr else "Configuration test failed"
+                    app.logger.error(f"Nginx configuration test failed: {error_msg}")
+                    return jsonify({
+                        'error': 'Nginx configuration test failed',
+                        'message': error_msg
                     }), 400
 
             # Special handling for backend service restart
@@ -362,14 +600,24 @@ def create_app():
                     'status': 'restarting'
                 })
 
-            # For DHCP service, use synchronous restart with status checking
-            app.logger.info(f"Restarting service: {full_service_name}")
-            result = subprocess.run(
-                ['/usr/bin/sudo', '/bin/systemctl', 'restart', full_service_name],
-                capture_output=True,
-                text=True,
-                timeout=30
-            )
+            # For nginx, use reload instead of restart
+            if service_name == 'nginx':
+                app.logger.info(f"Reloading nginx service: {full_service_name}")
+                result = subprocess.run(
+                    ['/usr/bin/sudo', '/bin/systemctl', 'reload', full_service_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
+            else:
+                # For DHCP service, use synchronous restart with status checking
+                app.logger.info(f"Restarting service: {full_service_name}")
+                result = subprocess.run(
+                    ['/usr/bin/sudo', '/bin/systemctl', 'restart', full_service_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=30
+                )
 
             if result.returncode == 0:
                 # Check if service is running
@@ -383,9 +631,10 @@ def create_app():
                 service_status = status_result.stdout.strip()
 
                 if service_status == 'active':
-                    app.logger.info(f"Service restarted successfully: {full_service_name} - status: {service_status}")
+                    action = 'reloaded' if service_name == 'nginx' else 'restarted'
+                    app.logger.info(f"Service {action} successfully: {full_service_name} - status: {service_status}")
                     return jsonify({
-                        'message': f'Service {full_service_name} restarted successfully',
+                        'message': f'Service {full_service_name} {action} successfully',
                         'status': 'active'
                     })
                 else:
@@ -420,11 +669,12 @@ def create_app():
             return jsonify({'error': 'Failed to restart service', 'message': str(e)}), 500
     
     @app.route(f"{app.config['API_PREFIX']}/service/status/<service_name>", methods=['GET'])
+    @require_auth
     def get_service_status(service_name):
-        """Get the current status of a service (DHCP or backend)"""
+        """Get the current status of a service (DHCP, backend, or nginx)"""
         try:
-            # Validate service name - only allow these two services
-            allowed_services = ['isc-dhcp-server', 'dhcp-manager']
+            # Validate service name - only allow these services
+            allowed_services = ['isc-dhcp-server', 'dhcp-manager', 'nginx']
             if service_name not in allowed_services:
                 app.logger.warning(f"Invalid service status request: {service_name}")
                 return jsonify({
@@ -469,6 +719,7 @@ def create_app():
             return jsonify({'error': 'Failed to get service status', 'message': str(e)}), 500
     
     @app.route(f"{app.config['API_PREFIX']}/backups", methods=['GET'])
+    @require_auth
     def list_backups():
         """List available configuration backups"""
         try:
@@ -522,6 +773,7 @@ def create_app():
 
     # Subnet management endpoints
     @app.route(f"{app.config['API_PREFIX']}/subnets", methods=['GET'])
+    @require_auth
     def get_subnets():
         """Get all subnet declarations"""
         try:
@@ -536,9 +788,15 @@ def create_app():
             return jsonify({'error': 'Failed to read subnets', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/subnets/<network>", methods=['GET'])
+    @require_auth
     def get_subnet(network):
         """Get a specific subnet"""
         try:
+            # Validate network parameter
+            if not dhcp_parser.validate_ip_address(network):
+                app.logger.warning(f"Invalid network address in URL: {network}")
+                return jsonify({'error': 'Invalid network address format'}), 400
+
             subnet = dhcp_parser.get_subnet(network)
             if subnet:
                 app.logger.debug(f"Retrieved subnet: {network}")
@@ -553,6 +811,7 @@ def create_app():
             return jsonify({'error': 'Failed to read subnet', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/subnets", methods=['POST'])
+    @require_auth
     def add_subnet():
         """Add a new subnet"""
         try:
@@ -589,9 +848,15 @@ def create_app():
             return jsonify({'error': 'Failed to add subnet', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/subnets/<network>", methods=['PUT'])
+    @require_auth
     def update_subnet(network):
         """Update an existing subnet"""
         try:
+            # Validate network parameter
+            if not dhcp_parser.validate_ip_address(network):
+                app.logger.warning(f"Invalid network address in URL: {network}")
+                return jsonify({'error': 'Invalid network address format'}), 400
+
             data = request.get_json()
             if not data:
                 app.logger.warning(f"Update subnet request for {network} with no JSON data")
@@ -620,9 +885,15 @@ def create_app():
             return jsonify({'error': 'Failed to update subnet', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/subnets/<network>", methods=['DELETE'])
+    @require_auth
     def delete_subnet(network):
         """Delete a subnet"""
         try:
+            # Validate network parameter
+            if not dhcp_parser.validate_ip_address(network):
+                app.logger.warning(f"Invalid network address in URL: {network}")
+                return jsonify({'error': 'Invalid network address format'}), 400
+
             dhcp_parser.delete_subnet(network)
             app.logger.info(f"Deleted subnet: {network}")
             return jsonify({'message': f'Subnet {network} deleted successfully'})
@@ -639,6 +910,7 @@ def create_app():
 
     # Zone management endpoints
     @app.route(f"{app.config['API_PREFIX']}/zones", methods=['GET'])
+    @require_auth
     def get_zones():
         """Get all zone declarations"""
         try:
@@ -653,9 +925,15 @@ def create_app():
             return jsonify({'error': 'Failed to read zones', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/zones/<zone_name>", methods=['GET'])
+    @require_auth
     def get_zone(zone_name):
         """Get a specific zone"""
         try:
+            # Validate zone_name parameter
+            if not dhcp_parser.validate_zone_name(zone_name):
+                app.logger.warning(f"Invalid zone name in URL: {zone_name}")
+                return jsonify({'error': 'Invalid zone name format'}), 400
+
             zone = dhcp_parser.get_zone(zone_name)
             if zone:
                 app.logger.debug(f"Retrieved zone: {zone_name}")
@@ -670,6 +948,7 @@ def create_app():
             return jsonify({'error': 'Failed to read zone', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/zones", methods=['POST'])
+    @require_auth
     def add_zone():
         """Add a new zone"""
         try:
@@ -705,9 +984,15 @@ def create_app():
             return jsonify({'error': 'Failed to add zone', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/zones/<zone_name>", methods=['PUT'])
+    @require_auth
     def update_zone(zone_name):
         """Update an existing zone"""
         try:
+            # Validate zone_name parameter
+            if not dhcp_parser.validate_zone_name(zone_name):
+                app.logger.warning(f"Invalid zone name in URL: {zone_name}")
+                return jsonify({'error': 'Invalid zone name format'}), 400
+
             data = request.get_json()
             if not data:
                 app.logger.warning(f"Update zone request for {zone_name} with no JSON data")
@@ -735,9 +1020,15 @@ def create_app():
             return jsonify({'error': 'Failed to update zone', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/zones/<zone_name>", methods=['DELETE'])
+    @require_auth
     def delete_zone(zone_name):
         """Delete a zone"""
         try:
+            # Validate zone_name parameter
+            if not dhcp_parser.validate_zone_name(zone_name):
+                app.logger.warning(f"Invalid zone name in URL: {zone_name}")
+                return jsonify({'error': 'Invalid zone name format'}), 400
+
             dhcp_parser.delete_zone(zone_name)
             app.logger.info(f"Deleted zone: {zone_name}")
             return jsonify({'message': f'Zone {zone_name} deleted successfully'})
@@ -754,6 +1045,7 @@ def create_app():
 
     # Global configuration endpoints
     @app.route(f"{app.config['API_PREFIX']}/global-config", methods=['GET'])
+    @require_auth
     def get_global_config():
         """Get global DHCP configuration settings"""
         try:
@@ -768,6 +1060,7 @@ def create_app():
             return jsonify({'error': 'Failed to read global configuration', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/global-config", methods=['PUT'])
+    @require_auth
     def update_global_config():
         """Update global DHCP configuration settings"""
         try:
@@ -808,6 +1101,7 @@ def create_app():
 
     # App configuration endpoints
     @app.route(f"{app.config['API_PREFIX']}/app-config", methods=['GET'])
+    @require_auth
     def get_app_config():
         """Get application configuration with sensitive values masked"""
         try:
@@ -826,6 +1120,7 @@ def create_app():
             return jsonify({'error': 'Failed to read application configuration', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/app-config/schema", methods=['GET'])
+    @require_auth
     def get_app_config_schema():
         """Get configuration schema for frontend form generation"""
         try:
@@ -837,6 +1132,7 @@ def create_app():
             return jsonify({'error': 'Failed to read configuration schema', 'message': str(e)}), 500
 
     @app.route(f"{app.config['API_PREFIX']}/app-config", methods=['PUT'])
+    @require_auth
     def update_app_config():
         """Update application configuration"""
         try:
@@ -884,6 +1180,63 @@ def create_app():
         except Exception as e:
             app.logger.error(f"Failed to update app configuration: {str(e)}")
             return jsonify({'error': 'Failed to update application configuration', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/tls/certificate-info", methods=['GET'])
+    @require_auth
+    def get_tls_certificate_info():
+        """Get TLS certificate information"""
+        try:
+            cert_path = app.config.get('TLS_CERTIFICATE_PATH')
+            app.logger.debug(f"Attempting to get certificate info for: {cert_path}")
+            if not cert_path:
+                app.logger.warning("TLS certificate path not configured")
+                return jsonify({'error': 'TLS certificate path not configured'}), 400
+
+            cert_info = get_certificate_info(cert_path)
+            app.logger.debug(f"Retrieved TLS certificate info: {cert_path}")
+            return jsonify(cert_info.to_dict())
+
+
+        except FileNotFoundError as e:
+            app.logger.warning(f"TLS certificate file not found: {str(e)}")
+            return jsonify({'error': 'Certificate file not found', 'message': str(e)}), 404
+        except PermissionError as e:
+            app.logger.error(f"Permission denied reading TLS certificate: {str(e)}")
+            return jsonify({'error': 'Permission denied', 'message': str(e)}), 403
+        except ValueError as e:
+            app.logger.warning(f"Invalid TLS certificate: {str(e)}")
+            return jsonify({'error': 'Invalid certificate', 'message': str(e)}), 400
+        except Exception as e:
+            app.logger.error(f"Failed to get TLS certificate info: {str(e)}")
+            return jsonify({'error': 'Failed to get certificate information', 'message': str(e)}), 500
+
+    @app.route(f"{app.config['API_PREFIX']}/tls/validate-certificate", methods=['POST'])
+    @require_auth
+    def validate_tls_certificate():
+        """Validate TLS certificate file"""
+        try:
+            data = request.get_json()
+            cert_path = data.get('cert_path') if data else None
+
+            # Use config value if not provided
+            if not cert_path:
+                cert_path = app.config.get('TLS_CERTIFICATE_PATH')
+
+            if not cert_path:
+                app.logger.warning("TLS certificate path not provided")
+                return jsonify({'error': 'Certificate path required'}), 400
+
+            is_valid, message = validate_certificate_file(cert_path)
+            app.logger.info(f"TLS certificate validation: {message}")
+
+            return jsonify({
+                'valid': is_valid,
+                'message': message
+            })
+
+        except Exception as e:
+            app.logger.error(f"Failed to validate TLS certificate: {str(e)}")
+            return jsonify({'error': 'Failed to validate certificate', 'message': str(e)}), 500
 
     return app
 

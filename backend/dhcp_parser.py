@@ -209,9 +209,16 @@ class DHCPParser:
             return False
     
     def validate_hostname(self, hostname: str) -> bool:
-        """Validate hostname format"""
-        pattern = r'^[a-zA-Z0-9-_]+$'
-        return bool(re.match(pattern, hostname)) and len(hostname) > 0
+        """
+        Validate hostname format (RFC 952/1123 compliant)
+        - Total length: 1-253 characters
+        - Each label: 1-63 characters
+        - Labels must start/end with alphanumeric
+        - Hyphens allowed in middle of labels
+        - Supports FQDN with optional trailing dot
+        """
+        pattern = r'^(?=.{1,253}\.?$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(?:\.(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?))*\.?$'
+        return bool(re.match(pattern, hostname))
 
     def validate_netmask(self, netmask: str) -> bool:
         """Validate netmask format"""
@@ -310,9 +317,11 @@ class DHCPParser:
                     try:
                         # Preserve original ownership (UID and GID)
                         os.chown(temp_path, stat_info.st_uid, stat_info.st_gid)
-                    except (PermissionError, OSError):
+                        logger.debug(f"Preserved DHCP config ownership: uid={stat_info.st_uid}, gid={stat_info.st_gid}")
+                    except (PermissionError, OSError) as e:
                         # chown may fail if not running as root, that's ok
-                        pass
+                        logger.warning(f"Failed to preserve ownership on DHCP config file (uid={stat_info.st_uid}, gid={stat_info.st_gid}): {str(e)}")
+                        logger.warning("DHCP config file may have incorrect ownership - check permissions manually")
 
                 # Atomic rename (overwrites existing file)
                 os.replace(temp_path, self.config_path)

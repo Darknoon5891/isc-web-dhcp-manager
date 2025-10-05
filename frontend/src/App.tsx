@@ -13,6 +13,7 @@ import ZoneForm from "./components/ZoneForm";
 import GlobalConfigForm from "./components/GlobalConfigForm";
 import ConfigViewer from "./components/ConfigViewer";
 import AppSettingsForm from "./components/AppSettingsForm";
+import Login from "./components/Login";
 import apiService, {
   DHCPHost,
   DHCPSubnet,
@@ -20,7 +21,13 @@ import apiService, {
   APIError,
 } from "./services/api";
 
-type ActiveTab = "hosts" | "subnets" | "zones" | "global" | "config" | "appsettings";
+type ActiveTab =
+  | "hosts"
+  | "subnets"
+  | "zones"
+  | "global"
+  | "config"
+  | "appsettings";
 
 function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("hosts");
@@ -37,9 +44,40 @@ function App() {
     connected: true,
     error: null,
   });
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isCheckingAuth, setIsCheckingAuth] = useState(true);
 
-  // Check backend connectivity on app load
+  // Check authentication on app load
   useEffect(() => {
+    const checkAuth = async () => {
+      const token = localStorage.getItem("auth_token");
+
+      if (!token) {
+        setIsAuthenticated(false);
+        setIsCheckingAuth(false);
+        return;
+      }
+
+      try {
+        const result = await apiService.verifyToken();
+        setIsAuthenticated(result.valid);
+      } catch (err) {
+        setIsAuthenticated(false);
+        localStorage.removeItem("auth_token");
+      } finally {
+        setIsCheckingAuth(false);
+      }
+    };
+
+    checkAuth();
+  }, []);
+
+  // Check backend connectivity after authentication
+  useEffect(() => {
+    if (!isAuthenticated || isCheckingAuth) {
+      return;
+    }
+
     const checkConnection = async () => {
       try {
         await apiService.healthCheck();
@@ -64,7 +102,7 @@ function App() {
     };
 
     checkConnection();
-  }, []);
+  }, [isAuthenticated, isCheckingAuth]);
 
   const handleTabChange = (tab: ActiveTab) => {
     setActiveTab(tab);
@@ -124,28 +162,78 @@ function App() {
     setRefreshTrigger((prev) => prev + 1);
   };
 
+  const handleLogin = (token: string) => {
+    localStorage.setItem("auth_token", token);
+    setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    apiService.logout();
+  };
+
   const isFormVisible =
     showAddForm ||
     editingHost !== null ||
     editingSubnet !== null ||
     editingZone !== null;
 
+  // Show loading while checking authentication
+  if (isCheckingAuth) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "center",
+          alignItems: "center",
+          minHeight: "100vh",
+        }}
+      >
+        <div className="loading">Checking authentication...</div>
+      </div>
+    );
+  }
+
+  // Show login if not authenticated
+  if (!isAuthenticated) {
+    return <Login onLoginSuccess={handleLogin} />;
+  }
+
   return (
     <div>
       {/* Header */}
       <div className="header">
         <div className="container">
-          <h1>ISC Web DHCP Configuration Manager</h1>
-          <p
+          <div
             style={{
-              margin: "10px 0 0 0",
-              fontSize: "14px",
-              opacity: 0.9,
-              fontWeight: "bold",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
             }}
           >
-            Server: {hostname}
-          </p>
+            <div>
+              <h1>ISC Web DHCP Configuration Manager</h1>
+              <p
+                style={{
+                  margin: "10px 0 0 0",
+                  fontSize: "14px",
+                  opacity: 0.9,
+                  fontWeight: "bold",
+                }}
+              >
+                Server: {hostname}
+              </p>
+            </div>
+            <button
+              className="btn"
+              onClick={handleLogout}
+              style={{
+                background: "#e74c3c",
+                marginLeft: "20px",
+              }}
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
 
@@ -192,7 +280,7 @@ function App() {
             className={`tab ${activeTab === "config" ? "active" : ""}`}
             onClick={() => handleTabChange("config")}
           >
-            DHCP Service Status
+            ISC DHCP Service Status
           </button>
           <button
             className={`tab ${activeTab === "appsettings" ? "active" : ""}`}

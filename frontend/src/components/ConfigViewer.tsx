@@ -28,19 +28,27 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
   );
   const [backendServiceStatus, setBackendServiceStatus] =
     useState<ServiceStatus | null>(null);
+  const [nginxServiceStatus, setNginxServiceStatus] =
+    useState<ServiceStatus | null>(null);
   const [validation, setValidation] = useState<ConfigValidation | null>(null);
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [validating, setValidating] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [restartingBackend, setRestartingBackend] = useState(false);
+  const [restartingNginx, setRestartingNginx] = useState(false);
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
   const [showBackendRestartConfirm, setShowBackendRestartConfirm] =
     useState(false);
+  const [showNginxRestartConfirm, setShowNginxRestartConfirm] = useState(false);
   const [restartMessage, setRestartMessage] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
   const [backendRestartMessage, setBackendRestartMessage] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
+  const [nginxRestartMessage, setNginxRestartMessage] = useState<{
     type: "success" | "error";
     text: string;
   } | null>(null);
@@ -80,6 +88,15 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
     }
   };
 
+  const loadNginxServiceStatus = async () => {
+    try {
+      const status = await apiService.getServiceStatus("nginx");
+      setNginxServiceStatus(status);
+    } catch (err) {
+      console.warn("Failed to load nginx service status:", err);
+    }
+  };
+
   const loadBackups = async () => {
     try {
       const backupData = await apiService.getBackups();
@@ -93,6 +110,7 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
     if (showOnlyServiceStatus) {
       loadServiceStatus();
       loadBackendServiceStatus();
+      loadNginxServiceStatus();
     } else {
       loadConfig();
       loadServiceStatus();
@@ -194,6 +212,42 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
     setShowBackendRestartConfirm(false);
   };
 
+  const handleNginxRestartClick = () => {
+    setShowNginxRestartConfirm(true);
+    setNginxRestartMessage(null);
+  };
+
+  const handleNginxRestartConfirm = async () => {
+    try {
+      setRestartingNginx(true);
+      setShowNginxRestartConfirm(false);
+      const result = await apiService.restartService("nginx");
+      await loadNginxServiceStatus();
+      setNginxRestartMessage({
+        type: "success",
+        text: result.message || "Nginx service reloaded successfully!",
+      });
+    } catch (err) {
+      if (err instanceof APIError) {
+        setNginxRestartMessage({
+          type: "error",
+          text: err.message,
+        });
+      } else {
+        setNginxRestartMessage({
+          type: "error",
+          text: "Failed to reload nginx service. Please try again.",
+        });
+      }
+    } finally {
+      setRestartingNginx(false);
+    }
+  };
+
+  const handleNginxRestartCancel = () => {
+    setShowNginxRestartConfirm(false);
+  };
+
   const formatTimestamp = (timestamp: number): string => {
     return new Date(timestamp * 1000).toLocaleString();
   };
@@ -242,7 +296,7 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
               }}
             >
               <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
-                Confirm DHCP Service Restart
+                Confirm ISC DHCP Service Restart
               </h3>
               <p style={{ marginBottom: "20px", color: "#666" }}>
                 Are you sure you want to restart the DHCP service? This may
@@ -268,6 +322,65 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
                   style={{ background: "#e74c3c" }}
                 >
                   Restart Service
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Nginx Service Restart Confirmation Modal */}
+        {showNginxRestartConfirm && (
+          <div
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(0, 0, 0, 0.5)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              zIndex: 1000,
+            }}
+          >
+            <div
+              style={{
+                backgroundColor: "white",
+                padding: "30px",
+                borderRadius: "8px",
+                maxWidth: "500px",
+                width: "90%",
+                boxShadow: "0 4px 6px rgba(0, 0, 0, 0.1)",
+              }}
+            >
+              <h3 style={{ marginTop: 0, marginBottom: "15px" }}>
+                Confirm Nginx Service Reload
+              </h3>
+              <p style={{ marginBottom: "20px", color: "#666" }}>
+                Are you sure you want to reload the nginx service? The
+                configuration will be tested before reloading.
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  className="btn"
+                  onClick={handleNginxRestartCancel}
+                  style={{ background: "#95a5a6" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn"
+                  onClick={handleNginxRestartConfirm}
+                  style={{ background: "#e74c3c" }}
+                >
+                  Reload Service
                 </button>
               </div>
             </div>
@@ -485,6 +598,86 @@ const ConfigViewer: React.FC<ConfigViewerProps> = ({
                   }}
                 >
                   {backendServiceStatus.details}
+                </pre>
+              </details>
+            )}
+          </div>
+        )}
+
+        {/* Nginx Service Status Card */}
+        {nginxServiceStatus && (
+          <div className="card">
+            <h3>Nginx Service Status</h3>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "15px",
+                marginBottom: "15px",
+              }}
+            >
+              <div>
+                <strong>Service:</strong> {nginxServiceStatus.service}
+              </div>
+              <div>
+                <strong>Status:</strong>{" "}
+                <span
+                  style={{
+                    color: nginxServiceStatus.active ? "#27ae60" : "#e74c3c",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {nginxServiceStatus.status}
+                </span>
+              </div>
+              <button
+                className="btn"
+                onClick={handleNginxRestartClick}
+                disabled={restartingNginx}
+                style={{ background: "#3498db" }}
+              >
+                {restartingNginx ? "Reloading..." : "Reload Service"}
+              </button>
+            </div>
+
+            {nginxRestartMessage && (
+              <div
+                className={`alert ${
+                  nginxRestartMessage.type === "success"
+                    ? "alert-success"
+                    : "alert-error"
+                }`}
+                style={{ marginTop: "15px" }}
+              >
+                <pre
+                  style={{
+                    margin: 0,
+                    whiteSpace: "pre-wrap",
+                    fontFamily: "inherit",
+                    fontSize: "inherit",
+                  }}
+                >
+                  {nginxRestartMessage.text}
+                </pre>
+              </div>
+            )}
+
+            {nginxServiceStatus.details && (
+              <details>
+                <summary style={{ cursor: "pointer", marginBottom: "10px" }}>
+                  View Service Details
+                </summary>
+                <pre
+                  style={{
+                    background: "#f8f9fa",
+                    padding: "10px",
+                    borderRadius: "4px",
+                    fontSize: "12px",
+                    overflow: "auto",
+                    maxHeight: "200px",
+                  }}
+                >
+                  {nginxServiceStatus.details}
                 </pre>
               </details>
             )}
