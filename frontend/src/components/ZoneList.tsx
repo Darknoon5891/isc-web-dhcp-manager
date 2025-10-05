@@ -239,20 +239,20 @@ const ZoneList: React.FC<ZoneListProps> = ({ onEditZone, onRefresh, refreshTrigg
           zIndex: 1000
         }}>
           <div style={{
-            backgroundColor: 'white',
+            backgroundColor: 'var(--bg-modal)',
             padding: '30px',
             borderRadius: '8px',
             maxWidth: '500px',
             width: '90%',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)'
+            boxShadow: '0 4px 6px var(--shadow)'
           }}>
             <h3 style={{ marginTop: 0, marginBottom: '20px', color: '#e74c3c' }}>
               Confirm Delete
             </h3>
-            <p style={{ marginBottom: '20px', fontSize: '16px' }}>
+            <p style={{ marginBottom: '20px', fontSize: '16px', color: 'var(--text-primary)' }}>
               Are you sure you want to delete zone <strong>"{confirmDelete.zone_name}"</strong>?
             </p>
-            <p style={{ marginBottom: '20px', fontSize: '14px', color: '#666' }}>
+            <p style={{ marginBottom: '20px', fontSize: '14px', color: 'var(--text-secondary)' }}>
               This action cannot be undone. DNS updates for this zone will no longer be processed.
             </p>
 

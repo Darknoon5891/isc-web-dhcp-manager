@@ -480,11 +480,6 @@ def create_app():
     def delete_host(hostname):
         """Delete a host reservation"""
         try:
-            # Validate hostname parameter
-            if not dhcp_parser.validate_hostname(hostname):
-                app.logger.warning(f"Invalid hostname in URL: {hostname}")
-                return jsonify({'error': 'Invalid hostname format'}), 400
-
             dhcp_parser.delete_host(hostname)
             app.logger.info(f"Deleted host reservation: {hostname}")
             return jsonify({'message': f'Host {hostname} deleted successfully'})
