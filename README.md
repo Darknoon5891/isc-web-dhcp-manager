@@ -56,6 +56,7 @@ The script automatically:
 - Builds and deploys React frontend to `/var/www/dhcp-manager`
 - Generates 10-year self-signed TLS certificate with proper SANs
 - Configures Nginx with HTTPS (TLS 1.2/1.3), security headers, and HTTP→HTTPS redirect
+- Auto-detects port availability: uses port 443 if available, falls back to port 8000 if 443 is occupied
 - Sets up passwordless sudo for specific service management commands
 - Creates application configuration in `/opt/dhcp-manager/config/`
 - Intelligently handles DHCP configuration:
@@ -68,7 +69,9 @@ The script automatically:
 
 **Post-Deployment:**
 
-1. Access the web interface at `https://<server-ip>` (accept self-signed certificate warning)
+1. Access the web interface at `https://<server-ip>` (or `https://<server-ip>:8000` if port 443 was in use)
+   - The deployment script automatically uses port 443 if available, or falls back to port 8000 if port 443 is occupied
+   - Accept self-signed certificate warning in browser
 2. Login with password: `admin`
 3. **Immediately change the default password** in App Settings tab
 4. Optionally configure custom TLS certificate paths in App Settings
@@ -396,15 +399,19 @@ To use custom certificates:
 
 ### Firewall Configuration
 
-Ensure port 443 is accessible:
+Ensure the HTTPS port is accessible. The deployment script uses port 443 by default, or port 8000 if 443 is already in use:
 
 ```bash
-# UFW
+# UFW (allow both ports to be safe)
 sudo ufw allow 443/tcp
+sudo ufw allow 8000/tcp
 
 # iptables
 sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT
+sudo iptables -A INPUT -p tcp --dport 8000 -j ACCEPT
 ```
+
+**Note:** Only one port will be used depending on availability. Check deployment output to confirm which port was selected.
 
 ## Security Best Practices
 
