@@ -34,8 +34,8 @@ if systemctl list-unit-files 2>/dev/null | grep -q 'isc-dhcp-server.service'; th
 fi
 
 echo "Step 1: Installing system dependencies..."
-apt-get update
-apt-get install -y python3.11 python3.11-venv nginx curl openssl
+sudo apt-get update
+sudo apt-get install -y python3.11 python3.11-venv nginx curl openssl
 # install isc-dhcp-server as a special case as it writes a default/invalid config and then attempts to start
 # redirect stdout to null until we can write the correct config: 
 sudo apt-get install -y isc-dhcp-server 1>/dev/null
@@ -130,6 +130,18 @@ echo "Browsers will show security warnings on first access."
 echo ""
 
 echo "Step 7: Configuring nginx..."
+
+# Check if port 443 is available, fall back to 8000 if in use
+if ss -tuln 2>/dev/null | grep -q ':443 ' || netstat -tuln 2>/dev/null | grep -q ':443 '; then
+    HTTPS_PORT=8000
+    REDIRECT_PORT=":8000"
+    echo "Port 443 is in use, using port 8000 for HTTPS"
+else
+    HTTPS_PORT=443
+    REDIRECT_PORT=""
+    echo "Port 443 is available, using it for HTTPS"
+fi
+
 cat > /etc/nginx/sites-available/dhcp-manager <<EOF
 # HTTP server - redirect to HTTPS
 server {
@@ -137,12 +149,12 @@ server {
     server_name _;
 
     # Redirect all HTTP traffic to HTTPS
-    return 301 https://\$host\$request_uri;
+    return 301 https://\$host$REDIRECT_PORT\$request_uri;
 }
 
 # HTTPS server
 server {
-    listen 443 ssl http2;
+    listen $HTTPS_PORT ssl http2;
     server_name _;
 
     # SSL Certificate (self-signed)
@@ -577,8 +589,8 @@ echo "Restarting DHCP Manager backend to apply all changes..."
 systemctl restart dhcp-manager
 echo ""
 echo "=========================================="
-echo "Access the application at: https://$(hostname -I | awk '{print $1}')"
-echo "  or: https://$(hostname -f)"
+echo "Access the application at: https://$(hostname -I | awk '{print $1}')$REDIRECT_PORT"
+echo "  or: https://$(hostname -f)$REDIRECT_PORT"
 echo "=========================================="
 echo ""
 echo "IMPORTANT: Self-signed SSL certificate in use"
