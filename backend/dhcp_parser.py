@@ -1091,8 +1091,8 @@ class DHCPParser:
                 config.max_lease_time = int(match.group(1))
                 continue
 
-            # Parse authoritative
-            if stripped == 'authoritative;':
+            # Parse authoritative (handle inline comments)
+            if re.match(r'^authoritative\s*;', stripped):
                 config.authoritative = True
                 continue
 
@@ -1190,119 +1190,149 @@ class DHCPParser:
         # Track which global settings we've found and replaced
         replaced_settings = set()
         new_lines = []
-        global_section_ended = False
 
+        # Scan file and replace first occurrence, skip duplicates
         for line in lines:
             stripped = line.strip()
+            line_handled = False
 
-            # Check if global section has ended
-            if (stripped.startswith('subnet ') or
-                stripped.startswith('host ') or
-                stripped.startswith('zone ')):
-                # If we haven't added all global settings yet, add them now
-                if not global_section_ended:
-                    global_section_ended = True
-                    # Add any missing settings
-                    self._add_missing_global_settings(new_lines, new_config, replaced_settings)
-                    new_lines.append('')  # Empty line before first declaration
-
+            # Skip empty lines and comments
+            if not stripped or stripped.startswith('#'):
                 new_lines.append(line)
                 continue
 
-            # Replace existing global settings
-            if not global_section_ended:
-                # Skip empty lines and comments in global section
-                if not stripped or stripped.startswith('#'):
-                    new_lines.append(line)
-                    continue
+            # Check and replace each global setting (scan entire file)
+            if re.match(r'default-lease-time\s+\d+\s*;', stripped):
+                if 'default-lease-time' not in replaced_settings:
+                    new_lines.append(f"default-lease-time {new_config.default_lease_time};")
+                    replaced_settings.add('default-lease-time')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                # Check and replace each setting
-                if re.match(r'default-lease-time\s+\d+\s*;', stripped):
-                    if 'default-lease-time' not in replaced_settings:
-                        new_lines.append(f"default-lease-time {new_config.default_lease_time};")
-                        replaced_settings.add('default-lease-time')
-                    continue
+            elif re.match(r'max-lease-time\s+\d+\s*;', stripped):
+                if 'max-lease-time' not in replaced_settings:
+                    new_lines.append(f"max-lease-time {new_config.max_lease_time};")
+                    replaced_settings.add('max-lease-time')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'max-lease-time\s+\d+\s*;', stripped):
-                    if 'max-lease-time' not in replaced_settings:
-                        new_lines.append(f"max-lease-time {new_config.max_lease_time};")
-                        replaced_settings.add('max-lease-time')
-                    continue
+            elif re.match(r'^authoritative\s*;', stripped):
+                if 'authoritative' not in replaced_settings:
+                    if new_config.authoritative:
+                        new_lines.append("authoritative;")
+                    replaced_settings.add('authoritative')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if stripped == 'authoritative;':
-                    if 'authoritative' not in replaced_settings:
-                        if new_config.authoritative:
-                            new_lines.append("authoritative;")
-                        replaced_settings.add('authoritative')
-                    continue
+            elif re.match(r'log-facility\s+', stripped):
+                if 'log-facility' not in replaced_settings:
+                    if new_config.log_facility:
+                        new_lines.append(f"log-facility {new_config.log_facility};")
+                    replaced_settings.add('log-facility')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'log-facility\s+', stripped):
-                    if 'log-facility' not in replaced_settings:
-                        if new_config.log_facility:
-                            new_lines.append(f"log-facility {new_config.log_facility};")
-                        replaced_settings.add('log-facility')
-                    continue
+            elif re.match(r'ddns-update-style\s+', stripped):
+                if 'ddns-update-style' not in replaced_settings:
+                    if new_config.ddns_update_style:
+                        new_lines.append(f"ddns-update-style {new_config.ddns_update_style};")
+                    replaced_settings.add('ddns-update-style')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'ddns-update-style\s+', stripped):
-                    if 'ddns-update-style' not in replaced_settings:
-                        if new_config.ddns_update_style:
-                            new_lines.append(f"ddns-update-style {new_config.ddns_update_style};")
-                        replaced_settings.add('ddns-update-style')
-                    continue
+            elif re.match(r'ping-check\s+', stripped):
+                if 'ping-check' not in replaced_settings:
+                    if new_config.ping_check:
+                        new_lines.append("ping-check true;")
+                        if new_config.ping_timeout:
+                            new_lines.append(f"ping-timeout {new_config.ping_timeout};")
+                    replaced_settings.add('ping-check')
+                    replaced_settings.add('ping-timeout')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'ping-check\s+', stripped):
-                    if 'ping-check' not in replaced_settings:
-                        if new_config.ping_check:
-                            new_lines.append("ping-check true;")
-                            if new_config.ping_timeout:
-                                new_lines.append(f"ping-timeout {new_config.ping_timeout};")
-                        replaced_settings.add('ping-check')
-                        replaced_settings.add('ping-timeout')
-                    continue
+            elif re.match(r'ping-timeout\s+', stripped):
+                if 'ping-timeout' not in replaced_settings:
+                    # Skip - handled with ping-check
+                    replaced_settings.add('ping-timeout')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'ping-timeout\s+', stripped):
-                    if 'ping-timeout' not in replaced_settings:
-                        # Skip - handled with ping-check
-                        replaced_settings.add('ping-timeout')
-                    continue
+            elif re.match(r'option\s+domain-name\s+"', stripped):
+                if 'domain-name' not in replaced_settings:
+                    if new_config.domain_name:
+                        new_lines.append(f'option domain-name "{new_config.domain_name}";')
+                    replaced_settings.add('domain-name')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'option\s+domain-name\s+"', stripped):
-                    if 'domain-name' not in replaced_settings:
-                        if new_config.domain_name:
-                            new_lines.append(f'option domain-name "{new_config.domain_name}";')
-                        replaced_settings.add('domain-name')
-                    continue
+            elif re.match(r'option\s+domain-name-servers\s+', stripped):
+                if 'domain-name-servers' not in replaced_settings:
+                    if new_config.domain_name_servers:
+                        new_lines.append(f"option domain-name-servers {new_config.domain_name_servers};")
+                    replaced_settings.add('domain-name-servers')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'option\s+domain-name-servers\s+', stripped):
-                    if 'domain-name-servers' not in replaced_settings:
-                        if new_config.domain_name_servers:
-                            new_lines.append(f"option domain-name-servers {new_config.domain_name_servers};")
-                        replaced_settings.add('domain-name-servers')
-                    continue
+            elif re.match(r'option\s+ntp-servers\s+', stripped):
+                if 'ntp-servers' not in replaced_settings:
+                    if new_config.ntp_servers:
+                        new_lines.append(f"option ntp-servers {new_config.ntp_servers};")
+                    replaced_settings.add('ntp-servers')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'option\s+ntp-servers\s+', stripped):
-                    if 'ntp-servers' not in replaced_settings:
-                        if new_config.ntp_servers:
-                            new_lines.append(f"option ntp-servers {new_config.ntp_servers};")
-                        replaced_settings.add('ntp-servers')
-                    continue
+            elif re.match(r'option\s+time-offset\s+', stripped):
+                if 'time-offset' not in replaced_settings:
+                    if new_config.time_offset is not None:
+                        new_lines.append(f"option time-offset {new_config.time_offset};")
+                    replaced_settings.add('time-offset')
+                else:
+                    logger.warning(f"Duplicate global setting removed: {stripped}")
+                line_handled = True
 
-                if re.match(r'option\s+time-offset\s+', stripped):
-                    if 'time-offset' not in replaced_settings:
-                        if new_config.time_offset is not None:
-                            new_lines.append(f"option time-offset {new_config.time_offset};")
-                        replaced_settings.add('time-offset')
-                    continue
-
-                # Keep any other lines in global section
+            # If line wasn't a global setting (or was a duplicate), keep it as-is
+            if not line_handled:
                 new_lines.append(line)
-            else:
-                # After global section, keep everything as-is
-                new_lines.append(line)
 
-        # If no declarations found (empty file or only global settings), add missing settings
-        if not global_section_ended:
-            self._add_missing_global_settings(new_lines, new_config, replaced_settings)
+        # Prepend any missing global settings at the beginning
+        missing_settings = []
+        if 'default-lease-time' not in replaced_settings:
+            missing_settings.append(f"default-lease-time {new_config.default_lease_time};")
+        if 'max-lease-time' not in replaced_settings:
+            missing_settings.append(f"max-lease-time {new_config.max_lease_time};")
+        if 'authoritative' not in replaced_settings and new_config.authoritative:
+            missing_settings.append("authoritative;")
+        if 'log-facility' not in replaced_settings and new_config.log_facility:
+            missing_settings.append(f"log-facility {new_config.log_facility};")
+        if 'ddns-update-style' not in replaced_settings and new_config.ddns_update_style:
+            missing_settings.append(f"ddns-update-style {new_config.ddns_update_style};")
+        if 'ping-check' not in replaced_settings and new_config.ping_check:
+            missing_settings.append("ping-check true;")
+            if new_config.ping_timeout:
+                missing_settings.append(f"ping-timeout {new_config.ping_timeout};")
+        if 'domain-name' not in replaced_settings and new_config.domain_name:
+            missing_settings.append(f'option domain-name "{new_config.domain_name}";')
+        if 'domain-name-servers' not in replaced_settings and new_config.domain_name_servers:
+            missing_settings.append(f"option domain-name-servers {new_config.domain_name_servers};")
+        if 'ntp-servers' not in replaced_settings and new_config.ntp_servers:
+            missing_settings.append(f"option ntp-servers {new_config.ntp_servers};")
+        if 'time-offset' not in replaced_settings and new_config.time_offset is not None:
+            missing_settings.append(f"option time-offset {new_config.time_offset};")
+
+        # Add missing settings at the beginning if needed
+        if missing_settings:
+            new_lines = missing_settings + [''] + new_lines
 
         new_content = '\n'.join(new_lines)
         self.write_config(new_content)
