@@ -90,6 +90,7 @@ class DHCPZone:
     def to_dhcp_config(self) -> str:
         """Convert to DHCP configuration format"""
         # Zone names must end with a dot in DHCP config
+        # NOTE: Zone names are NOT quoted in ISC DHCP config (unlike DNS/BIND config)
         zone_name_with_dot = self.zone_name if self.zone_name.endswith('.') else f"{self.zone_name}."
         lines = [f'zone {zone_name_with_dot} {{']
 
@@ -1385,10 +1386,11 @@ class DHCPParser:
         while i < len(lines):
             line = lines[i]
 
-            # Check if this is the start of our target zone
-            zone_start = re.match(rf'zone\s+"([^"]+)"\s*\{{', line.strip())
+            # Check if this is the start of our target zone (handle both quoted and unquoted)
+            zone_start = re.match(r'zone\s+(?:"([^"]+)"|([^\s{]+))\s*\{', line.strip())
             if zone_start and not replaced:
-                found_zone = zone_start.group(1).rstrip('.')
+                # Get zone name from either quoted (group 1) or unquoted (group 2)
+                found_zone = (zone_start.group(1) or zone_start.group(2)).rstrip('.')
                 if found_zone == zone_name.rstrip('.'):
                     # Skip this zone block
                     brace_count = line.count('{') - line.count('}')
