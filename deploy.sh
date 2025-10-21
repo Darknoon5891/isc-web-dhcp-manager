@@ -192,7 +192,7 @@ if [ "$PASSWORD_RESET_MODE" = "true" ]; then
         echo ""
         echo "  New Password: $NEW_PASSWORD"
         echo ""
-        echo "  Service Status: ✓ Running"
+        echo "  Service Status: Running"
         echo "  Config Backup: $BACKUP_FILE"
         echo ""
         echo "=========================================="
@@ -206,7 +206,7 @@ if [ "$PASSWORD_RESET_MODE" = "true" ]; then
         echo "PASSWORD RESET FAILED"
         echo "=========================================="
         echo ""
-        echo "  Service Status: ✗ Failed to start"
+        echo "  Service Status: Failed to start"
         echo "  Restoring backup configuration..."
 
         cp "$BACKUP_FILE" /etc/isc-web-dhcp-manager/config.conf
