@@ -88,7 +88,7 @@ The script automatically:
 - Configures Nginx with HTTPS (TLS 1.2/1.3), security headers, and HTTP→HTTPS redirect
 - Auto-detects port availability: uses port 443 if available, falls back to port 8000 if 443 is occupied
 - Sets up passwordless sudo for specific service management commands
-- Creates application configuration in `/opt/dhcp-manager/config/`
+- Creates application configuration in `/etc/isc-web-dhcp-manager/`
 - Intelligently handles DHCP configuration:
   - Preserves existing configs with host declarations
   - Recreates default/invalid configs from fresh installs
@@ -110,8 +110,8 @@ The script automatically:
 **Important:**
 
 - Application runs as dedicated `dhcp-manager` user (non-root)
-- Config stored in `/opt/dhcp-manager/config/config.json`
-- Backups stored in `/opt/dhcp-manager/backups/`
+- Config stored in `/etc/isc-web-dhcp-manager/config.conf`
+- Backups stored in `/etc/isc-web-dhcp-manager/backups/`
 - Frontend served from `/var/www/dhcp-manager`
 - Backend runs on `127.0.0.1:5000` (proxied by Nginx)
 - Logs: `sudo journalctl -u dhcp-manager -f`
@@ -274,14 +274,14 @@ isc-web-dhcp-manager/
 
 ### Application Configuration File
 
-Located at `/opt/dhcp-manager/config/config.json` (created by deploy.sh)
+Located at `/etc/isc-web-dhcp-manager/config.conf` (created by deploy.sh)
 
 Key settings:
 
 - `DHCP_CONF_PATH`: Path to dhcpd.conf (default: `/etc/dhcp/dhcpd.conf`)
 - `DHCP_LEASES_PATH`: Path to lease file (default: `/var/lib/dhcp/dhcpd.leases`)
 - `BACKUP_DIR`: Configuration backup directory (default: `/opt/dhcp-manager/backups`)
-- `PASSWORD_FILE`: Bcrypt password hash file (default: `/opt/dhcp-manager/config/password.hash`)
+- `AUTH_PASSWORD_HASH`: Bcrypt password hash stored in config file
 - `TLS_CERT_PATH`: TLS certificate path (default: `/etc/nginx/ssl/dhcp-manager.crt`)
 - `TLS_KEY_PATH`: TLS key path (default: `/etc/nginx/ssl/dhcp-manager.key`)
 - `LOG_LEVEL`: Application log level (default: `INFO`)
@@ -368,7 +368,7 @@ sudo systemctl status nginx
 
 - Password may have changed - use new password
 - Token expired - logout and login again
-- Check password file: `/opt/dhcp-manager/config/password.hash`
+- Check password hash in config: `/etc/isc-web-dhcp-manager/config.conf` (AUTH_PASSWORD_HASH)
 
 **TLS Certificate Warnings**
 
@@ -498,9 +498,9 @@ This project is developed as a utility tool for managing DHCP configurations. Us
 ## Support
 
 - Review logs: `sudo journalctl -u dhcp-manager -f`
-- Check backups: `/opt/dhcp-manager/backups/`
+- Check backups: `/etc/isc-web-dhcp-manager/backups/`
 - ISC DHCP documentation: https://www.isc.org/dhcp/
-- Configuration schema: `/opt/dhcp-manager/config/config_schema.json`
+- Configuration schema: `/etc/isc-web-dhcp-manager/config_schema.json`
 
 ## Version
 
