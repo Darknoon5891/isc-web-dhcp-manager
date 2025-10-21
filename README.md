@@ -31,14 +31,41 @@ Built and tested on **Debian 12 (amd64)** with **Python 3.11**
 
 ## Quick Start
 
-### Automated Deployment (Recommended)
+### Quick Install (One Command)
 
-The deployment script provides complete automated installation:
+For fresh installations, use this one-line command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Darknoon5891/isc-web-dhcp-manager/main/deploy.sh | sudo bash
+```
+
+**What this does:**
+
+1. Downloads the deploy.sh script
+2. Auto-detects bootstrap mode (running from curl pipe)
+3. Clones the repository to a temporary directory
+4. Executes the full deployment automatically
+5. Cleans up temporary files after completion
+
+**Customization:**
+
+You can customize the installation with environment variables:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Darknoon5891/isc-web-dhcp-manager/main/deploy.sh | \
+  DHCP_MANAGER_REPO_URL="https://github.com/yourfork/repo.git" \
+  DHCP_MANAGER_BRANCH="main" \
+  sudo -E bash
+```
+
+### Manual Installation (Alternative)
+
+If you prefer to review the code first or need more control:
 
 1. **Clone the repository:**
 
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/Darknoon5891/isc-web-dhcp-manager.git
    cd isc-web-dhcp-manager
    ```
 
@@ -47,13 +74,16 @@ The deployment script provides complete automated installation:
    sudo ./deploy.sh
    ```
 
+### What deploy.sh Does
+
 The script automatically:
 
+- **Bootstrap Mode Detection**: Automatically clones repository if run via curl pipe, then re-executes from cloned directory
 - Detects its directory for flexible deployment locations
-- Installs system dependencies (Python 3.11, Nginx, ISC DHCP Server, Node.js)
+- Installs system dependencies (Python 3.11, Nginx, ISC DHCP Server)
 - Creates dedicated `dhcp-manager` system user with restricted permissions
 - Sets up backend with Gunicorn WSGI server and systemd service
-- Builds and deploys React frontend to `/var/www/dhcp-manager`
+- Copies pre-built React frontend from `frontend/build/` to `/var/www/dhcp-manager`
 - Generates 10-year self-signed TLS certificate with proper SANs
 - Configures Nginx with HTTPS (TLS 1.2/1.3), security headers, and HTTP→HTTPS redirect
 - Auto-detects port availability: uses port 443 if available, falls back to port 8000 if 443 is occupied

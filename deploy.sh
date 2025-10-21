@@ -11,7 +11,68 @@ if [ "$(id -u)" -ne 0 ]; then
    exit 1
 fi
 
-# Auto-detect script directory
+# Detect if running from stdin (piped from curl | bash)
+if [ ! -f "$0" ] || [ "$0" = "bash" ] || [ "$0" = "-bash" ] || [ "$0" = "sh" ] || [ "$0" = "-sh" ]; then
+    echo "=== Bootstrap Mode ==="
+    echo "Cloning repository..."
+    echo ""
+
+    # Check for git
+    if ! command -v git >/dev/null 2>&1; then
+        echo "Git not found. Installing git..."
+        apt-get update -qq
+        apt-get install -y git
+    fi
+
+    # Define repository URL and branch (can be overridden via environment variables) (will clone main by default)
+    REPO_URL="${DHCP_MANAGER_REPO_URL:-https://github.com/Darknoon5891/isc-web-dhcp-manager.git}"
+    REPO_BRANCH="${DHCP_MANAGER_BRANCH:-main}"
+
+    # Create temp directory with unique name using mktemp for guaranteed uniqueness
+    TEMP_DIR="$(mktemp -d -t dhcp-manager-install-XXXXXX)"
+    trap "rm -rf '$TEMP_DIR'" EXIT  # Ensure cleanup on exit
+
+    echo "Repository: $REPO_URL"
+    echo "Branch: $REPO_BRANCH"
+    echo "Cloning to: $TEMP_DIR/repo"
+    echo ""
+
+    # Clone repository
+    if ! git clone --depth=1 --branch "$REPO_BRANCH" "$REPO_URL" "$TEMP_DIR/repo"; then
+        echo ""
+        echo "ERROR: Failed to clone repository"
+        echo "Please check:"
+        echo "  1. Repository URL is correct"
+        echo "  2. Branch name is correct"
+        echo "  3. You have internet connectivity"
+        exit 1
+    fi
+
+    echo ""
+    echo "Repository cloned successfully"
+    echo "Re-executing deployment from cloned directory..."
+    echo "========================================"
+    echo ""
+
+    # Re-execute the script from cloned directory
+    cd "$TEMP_DIR/repo"
+    if [ -f "$TEMP_DIR/repo/deploy.sh" ]; then
+        bash "$TEMP_DIR/repo/deploy.sh"
+        EXIT_CODE=$?
+    else
+        echo "ERROR: deploy.sh not found in cloned repository at $TEMP_DIR/repo"
+        EXIT_CODE=1
+    fi
+
+    # Leave temp directory so trap can clean it up
+    cd /
+
+    # Cleanup happens via trap on EXIT
+    # Exit with the same code as the actual deployment
+    exit $EXIT_CODE
+fi
+
+# Auto-detect script directory (when running from local file)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SOURCE="${SCRIPT_DIR}"
 CONFIG_SOURCE="${APP_SOURCE}/config"
