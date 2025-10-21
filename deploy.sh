@@ -192,15 +192,40 @@ echo ""
 
 echo "Step 7: Configuring nginx..."
 
-# Check if port 443 is available, fall back to 8000 if in use
-if ss -tuln 2>/dev/null | grep -q ':443 ' || netstat -tuln 2>/dev/null | grep -q ':443 '; then
-    HTTPS_PORT=8000
-    REDIRECT_PORT=":8000"
-    echo "Port 443 is in use, using port 8000 for HTTPS"
+# Check for existing installation and preserve port configuration
+if [ -d "/etc/isc-web-dhcp-manager" ] && [ -f "/etc/nginx/sites-available/dhcp-manager" ]; then
+    # Existing installation found, check nginx config for current port
+    if grep -qFs 'listen 8000' /etc/nginx/sites-available/dhcp-manager 2>/dev/null; then
+        HTTPS_PORT=8000
+        REDIRECT_PORT=":8000"
+        echo "Existing installation detected using port 8000, preserving configuration"
+    elif grep -qFs 'listen 443' /etc/nginx/sites-available/dhcp-manager 2>/dev/null; then
+        HTTPS_PORT=443
+        REDIRECT_PORT=""
+        echo "Existing installation detected using port 443, preserving configuration"
+    else
+        # Config exists but no recognizable port, fall back to port availability check
+        if ss -tuln 2>/dev/null | grep -q ':443 ' || netstat -tuln 2>/dev/null | grep -q ':443 '; then
+            HTTPS_PORT=8000
+            REDIRECT_PORT=":8000"
+            echo "Port 443 is in use, using port 8000 for HTTPS"
+        else
+            HTTPS_PORT=443
+            REDIRECT_PORT=""
+            echo "Port 443 is available, using it for HTTPS"
+        fi
+    fi
 else
-    HTTPS_PORT=443
-    REDIRECT_PORT=""
-    echo "Port 443 is available, using it for HTTPS"
+    # No existing installation, check port availability
+    if ss -tuln 2>/dev/null | grep -q ':443 ' || netstat -tuln 2>/dev/null | grep -q ':443 '; then
+        HTTPS_PORT=8000
+        REDIRECT_PORT=":8000"
+        echo "Port 443 is in use, using port 8000 for HTTPS"
+    else
+        HTTPS_PORT=443
+        REDIRECT_PORT=""
+        echo "Port 443 is available, using it for HTTPS"
+    fi
 fi
 
 cat > /etc/nginx/sites-available/dhcp-manager <<EOF
