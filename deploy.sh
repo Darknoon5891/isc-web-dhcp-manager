@@ -116,7 +116,6 @@ if [ "$PASSWORD_RESET_MODE" = "true" ]; then
         echo "The configuration directory /etc/isc-web-dhcp-manager does not exist"
         echo ""
         echo "Please run the deployment script first:"
-        echo "  sudo $0"
         exit 1
     fi
 
@@ -125,7 +124,6 @@ if [ "$PASSWORD_RESET_MODE" = "true" ]; then
         echo "Expected: /etc/isc-web-dhcp-manager/config.conf"
         echo ""
         echo "Please run the deployment script first:"
-        echo "  sudo $0"
         exit 1
     fi
 
@@ -133,7 +131,6 @@ if [ "$PASSWORD_RESET_MODE" = "true" ]; then
     if ! id "dhcp-manager" >/dev/null 2>&1; then
         echo "ERROR: dhcp-manager user does not exist"
         echo "Please run the deployment script first:"
-        echo "  sudo $0"
         exit 1
     fi
 
@@ -143,7 +140,6 @@ if [ "$PASSWORD_RESET_MODE" = "true" ]; then
         echo "Expected: /opt/dhcp-manager/backend/venv"
         echo ""
         echo "Please run the deployment script first:"
-        echo "  sudo $0"
         exit 1
     fi
 
@@ -305,6 +301,11 @@ cd /opt/dhcp-manager/backend
 sudo -u "$BACKEND_USER" $PYTHON_VERSION -m venv venv
 sudo -u "$BACKEND_USER" venv/bin/pip install -r requirements.txt
 sudo -u "$BACKEND_USER" venv/bin/pip install gunicorn
+
+# Copy deploy.sh to permanent location for future use
+cp "$SCRIPT_DIR/deploy.sh" /opt/dhcp-manager/deploy.sh
+chmod 755 /opt/dhcp-manager/deploy.sh
+chown root:root /opt/dhcp-manager/deploy.sh
 
 echo ""
 echo "Step 4: Setting up web root..."
@@ -919,14 +920,13 @@ if [ "$SKIP_RECONFIGURE" = "true" ]; then
     echo "  Existing installation - password unchanged"
     echo ""
     echo "  Use your existing password to login"
-    echo "  To reset password, run: sudo $0 --reset"
+    echo "  To reset password, run: sudo /opt/dhcp-manager/deploy.sh --password_reset"
 else
     echo "  Username: (none - password only)"
     echo "  Password: $DEFAULT_PASSWORD"
     echo ""
     echo "IMPORTANT: Change this password immediately after login!"
     echo "  - Go to App Settings > Authentication"
-    echo "  - Or re-run this deployment script with --reset to generate a new password"
 fi
 echo "=========================================="
 echo ""
