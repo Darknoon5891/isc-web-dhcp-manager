@@ -118,7 +118,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
                 boxSizing: "border-box",
                 backgroundColor: "var(--bg-input)",
                 color: "var(--text-primary)",
-                transition: "background-color 0.3s, color 0.3s, border-color 0.3s",
+                transition:
+                  "background-color 0.3s, color 0.3s, border-color 0.3s",
               }}
               placeholder="Enter your password"
             />
@@ -150,7 +151,8 @@ const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           }}
         >
           <strong>Note:</strong> If you've forgotten your password, you can
-          regenerate it by re-running the deployment script on the server.
+          regenerate it by re-running the deployment script with the
+          --password_reset flag.
         </div>
       </div>
     </div>

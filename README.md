@@ -74,11 +74,86 @@ If you prefer to review the code first or need more control:
    sudo ./deploy.sh
    ```
 
+### Deployment Arguments
+
+The deploy.sh script supports optional arguments to control deployment behavior:
+
+#### Normal Re-deployment (No Arguments)
+
+```bash
+sudo ./deploy.sh
+```
+
+**Behavior:**
+
+- Preserves existing TLS certificates, nginx configuration, and port settings
+- Preserves SECRET_KEY and AUTH_PASSWORD_HASH from existing installation
+- Updates application code, dependencies, and frontend build
+- Safe for routine updates without disrupting configuration
+
+**When to use:**
+
+- Pulling latest code changes from repository
+- Updating dependencies or frontend build
+- Applying non-configuration updates
+
+#### Full Reset Mode (--reset)
+
+```bash
+sudo ./deploy.sh --reset
+```
+
+**Behavior:**
+
+- Forces complete reconfiguration of all services
+- Regenerates TLS certificates
+- Reconfigures nginx (may change port if 443 becomes available/unavailable)
+- Creates new SECRET_KEY and AUTH_PASSWORD_HASH
+- Essentially performs a fresh installation while preserving DHCP configuration
+
+**When to use:**
+
+- Fixing corrupted TLS certificates
+- Resolving nginx configuration issues
+- Recovering from service configuration problems
+- Intentionally resetting to default state
+
+#### Password Reset Mode (--password_reset)
+
+```bash
+sudo ./deploy.sh --password_reset
+```
+
+**Behavior:**
+
+- Generates a new secure random password (16 characters)
+- Updates AUTH_PASSWORD_HASH in `/etc/isc-web-dhcp-manager/config.conf`
+- Creates automatic backup before changes
+- Restarts dhcp-manager backend service
+- Verifies service health and automatically rolls back on failure
+- Displays new password on success
+
+**When to use:**
+
+- Lost or forgotten password
+- Security incident requiring password rotation
+- Quick password reset without full re-deployment
+
+**Features:**
+
+- Automatic rollback if service fails to restart
+- Configuration backup with timestamp
+- Validation of hash update before service restart
+- Proper file permissions maintained throughout process
+
+**Note:** `--reset` and `--password_reset` cannot be used together.
+
 ### What deploy.sh Does
 
 The script automatically:
 
 - **Bootstrap Mode Detection**: Automatically clones repository if run via curl pipe, then re-executes from cloned directory
+- **Smart Re-deployment**: On re-runs, preserves existing TLS certificates, nginx configuration, port settings, SECRET_KEY, and AUTH_PASSWORD_HASH (use `--reset` to override)
 - Detects its directory for flexible deployment locations
 - Installs system dependencies (Python 3.11, Nginx, ISC DHCP Server)
 - Creates dedicated `dhcp-manager` system user with restricted permissions
@@ -115,6 +190,67 @@ The script automatically:
 - Frontend served from `/var/www/dhcp-manager`
 - Backend runs on `127.0.0.1:5000` (proxied by Nginx)
 - Logs: `sudo journalctl -u dhcp-manager -f`
+
+### Re-Deployment and Updates
+
+To update the application with the latest changes:
+
+**Standard Update (Recommended)**
+
+```bash
+cd /path/to/isc-web-dhcp-manager
+git pull
+sudo ./deploy.sh
+```
+
+This will:
+
+- Update application code and dependencies
+- Rebuild and deploy frontend
+- Preserve all existing configuration (TLS, nginx, passwords, ports)
+- Restart services automatically
+
+**Full Reconfiguration**
+
+If you need to regenerate configuration or fix service issues:
+
+```bash
+cd /path/to/isc-web-dhcp-manager
+git pull
+sudo ./deploy.sh --reset
+```
+
+This will:
+
+- Perform complete reconfiguration
+- Regenerate TLS certificates
+- Reconfigure nginx (may change port)
+- Generate new SECRET_KEY and AUTH_PASSWORD_HASH (new password: `admin`)
+- Preserve DHCP host/subnet/zone configuration
+
+**Password Reset Only**
+
+For quick password reset without full deployment:
+
+```bash
+cd /path/to/isc-web-dhcp-manager
+sudo ./deploy.sh --password_reset
+```
+
+This will:
+
+- Generate and display new random password
+- Update password hash in config
+- Restart backend service only
+- Automatically rollback if service fails
+
+**Important Notes:**
+
+- Normal re-deployment is safe and preserves all settings
+- Use `--reset` only when you need to fix configuration issues
+- Use `--password_reset` for quick password recovery
+- Configuration backups are created automatically before changes
+- DHCP server configuration (hosts, subnets, zones) is always preserved
 
 ### Manual Development Setup
 
@@ -388,6 +524,68 @@ sudo systemctl status nginx
 - Wait 5-10 seconds for service to restart
 - Refresh page and login with new password
 
+**Password Reset Failed**
+
+If `sudo ./deploy.sh --password_reset` fails:
+
+1. Check if installation exists: `ls -la /etc/isc-web-dhcp-manager/`
+2. Verify dhcp-manager service is installed: `systemctl status dhcp-manager`
+3. Check configuration backup was created: `ls -la /etc/isc-web-dhcp-manager/backups/`
+4. Review backend logs: `sudo journalctl -u dhcp-manager -xe`
+5. Automatic rollback should have restored previous config
+
+**Service Won't Start After Password Reset**
+
+If service fails after password reset (automatic rollback occurs):
+
+1. Service automatically rolls back to previous configuration
+2. Previous password should still work
+3. Check rollback succeeded: `sudo systemctl status dhcp-manager`
+4. Verify config was restored: `grep AUTH_PASSWORD_HASH /etc/isc-web-dhcp-manager/config.conf`
+5. Try password reset again after fixing underlying issue
+6. Check Python environment: `ls -la /opt/dhcp-manager/backend/venv/`
+
+**Lost Password Recovery**
+
+If you've lost the admin password:
+
+1. **Use password reset tool (recommended)**:
+
+   ```bash
+   cd /path/to/isc-web-dhcp-manager
+   sudo ./deploy.sh --password_reset
+   ```
+
+   - Generates new random password automatically
+   - Creates backup before changes
+   - Automatically rolls back on failure
+
+2. **Manual recovery (if password reset fails)**:
+
+   ```bash
+   # Generate new hash
+   sudo -u dhcp-manager bash -c "source /opt/dhcp-manager/backend/venv/bin/activate && python3 -c \"import bcrypt; print(bcrypt.hashpw(b'newpassword', bcrypt.gensalt(rounds=12)).decode())\""
+
+   # Backup config
+   sudo cp /etc/isc-web-dhcp-manager/config.conf /etc/isc-web-dhcp-manager/config.conf.backup
+
+   # Edit config with new hash
+   sudo nano /etc/isc-web-dhcp-manager/config.conf
+   # Update AUTH_PASSWORD_HASH=<new_hash>
+
+   # Restart service
+   sudo systemctl restart dhcp-manager
+   ```
+
+3. **Full reset (last resort)**:
+   ```bash
+   cd /path/to/isc-web-dhcp-manager
+   sudo ./deploy.sh --reset
+   ```
+   - Resets password
+   - Regenerates all configuration
+   - Preserves DHCP host/subnet/zone configuration
+
 ### Validation Errors
 
 Always validate DHCP configuration before restarting:
@@ -469,7 +667,7 @@ sudo iptables -A INPUT -p tcp --dport 8000 -j ACCEPT
 1. **Backend**: Add routes in `app.py`, parser logic in `dhcp_parser.py`
 2. **Frontend**: Create components in `src/components/`, update API in `src/services/api.tsx`
 3. **Validation**: Add validation in both frontend (client-side) and backend (server-side)
-4. **Documentation**: Update CLAUDE.md with technical details
+4. **Documentation**: Update README.md
 
 ### Building for Production
 
@@ -488,8 +686,6 @@ Built files output to `frontend/build/` directory
 - **Authentication**: JWT tokens with bcrypt password hashing
 - **Configuration**: Direct file manipulation with automatic backups
 - **Service Management**: systemd with passwordless sudo for specific commands
-
-See `CLAUDE.md` for detailed technical documentation.
 
 ## License
 

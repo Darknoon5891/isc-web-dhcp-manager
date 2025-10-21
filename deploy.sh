@@ -72,6 +72,171 @@ if [ ! -f "$0" ] || [ "$0" = "bash" ] || [ "$0" = "-bash" ] || [ "$0" = "sh" ] |
     exit $EXIT_CODE
 fi
 
+# Parse command-line arguments
+FORCE_RESET=false
+PASSWORD_RESET_MODE=false
+for arg in "$@"; do
+    case $arg in
+        --reset)
+            FORCE_RESET=true
+            echo "Reset mode enabled - will reconfigure all services"
+            ;;
+        --password_reset)
+            PASSWORD_RESET_MODE=true
+            echo "Password reset mode enabled"
+            ;;
+        *)
+            echo "Unknown argument: $arg"
+            echo "Usage: $0 [--reset|--password_reset]"
+            echo "  --reset: Force full reconfiguration even if already installed"
+            echo "  --password_reset: Reset authentication password only (no full deployment)"
+            exit 1
+            ;;
+    esac
+done
+
+# Check for mutually exclusive arguments
+if [ "$FORCE_RESET" = "true" ] && [ "$PASSWORD_RESET_MODE" = "true" ]; then
+    echo "ERROR: Cannot use --reset and --password_reset together"
+    echo "Use --reset for full reconfiguration or --password_reset for password-only reset"
+    exit 1
+fi
+
+# ============================================================
+# Password Reset Mode - Quick password reset without full deployment
+# ============================================================
+if [ "$PASSWORD_RESET_MODE" = "true" ]; then
+    echo ""
+    echo "=== Password Reset Mode ==="
+    echo ""
+
+    # Check if DHCP Manager is installed
+    if [ ! -d "/etc/isc-web-dhcp-manager" ]; then
+        echo "ERROR: DHCP Manager is not installed"
+        echo "The configuration directory /etc/isc-web-dhcp-manager does not exist"
+        echo ""
+        echo "Please run the deployment script first:"
+        echo "  sudo $0"
+        exit 1
+    fi
+
+    if [ ! -f "/etc/isc-web-dhcp-manager/config.conf" ]; then
+        echo "ERROR: Configuration file not found"
+        echo "Expected: /etc/isc-web-dhcp-manager/config.conf"
+        echo ""
+        echo "Please run the deployment script first:"
+        echo "  sudo $0"
+        exit 1
+    fi
+
+    # Check if backend user exists
+    if ! id "dhcp-manager" >/dev/null 2>&1; then
+        echo "ERROR: dhcp-manager user does not exist"
+        echo "Please run the deployment script first:"
+        echo "  sudo $0"
+        exit 1
+    fi
+
+    # Check if venv exists
+    if [ ! -d "/opt/dhcp-manager/backend/venv" ]; then
+        echo "ERROR: Backend virtual environment not found"
+        echo "Expected: /opt/dhcp-manager/backend/venv"
+        echo ""
+        echo "Please run the deployment script first:"
+        echo "  sudo $0"
+        exit 1
+    fi
+
+    echo "Generating new random password..."
+    NEW_PASSWORD=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
+
+    echo "Generating bcrypt hash..."
+    NEW_PASSWORD_HASH=$(echo -n "$NEW_PASSWORD" | sudo -u dhcp-manager bash -c "source /opt/dhcp-manager/backend/venv/bin/activate && python3 -c \"import sys, bcrypt; pwd = sys.stdin.read().strip(); print(bcrypt.hashpw(pwd.encode('utf-8'), bcrypt.gensalt(rounds=12)).decode('utf-8'))\"")
+
+    if [ -z "$NEW_PASSWORD_HASH" ]; then
+        echo "ERROR: Failed to generate password hash"
+        echo "Please check that bcrypt is installed in the virtual environment"
+        exit 1
+    fi
+
+    echo "Creating backup of current configuration..."
+    mkdir -p /etc/isc-web-dhcp-manager/backups
+    BACKUP_FILE="/etc/isc-web-dhcp-manager/backups/config.conf.backup.$(date +%Y%m%d_%H%M%S)"
+    cp /etc/isc-web-dhcp-manager/config.conf "$BACKUP_FILE"
+    echo "Backup saved to: $BACKUP_FILE"
+
+    echo "Updating configuration with new password hash..."
+    sed -i "s|^AUTH_PASSWORD_HASH=.*|AUTH_PASSWORD_HASH=$NEW_PASSWORD_HASH|" /etc/isc-web-dhcp-manager/config.conf
+
+    # Verify the replacement succeeded
+    if ! grep -qF "AUTH_PASSWORD_HASH=$NEW_PASSWORD_HASH" /etc/isc-web-dhcp-manager/config.conf; then
+        echo "ERROR: Failed to update password hash in configuration"
+        echo "Restoring backup..."
+        cp "$BACKUP_FILE" /etc/isc-web-dhcp-manager/config.conf
+        chown dhcp-manager:dhcp-manager /etc/isc-web-dhcp-manager/config.conf
+        chmod 640 /etc/isc-web-dhcp-manager/config.conf
+        echo "Backup restored. No changes were made."
+        exit 1
+    fi
+
+    echo "Restarting DHCP Manager service..."
+    systemctl restart dhcp-manager.service
+
+    # Wait a moment for service to start
+    sleep 2
+
+    echo ""
+
+    # Check if service started successfully
+    if systemctl is-active --quiet dhcp-manager.service; then
+        # Success path
+        echo "=========================================="
+        echo "PASSWORD RESET SUCCESSFUL"
+        echo "=========================================="
+        echo ""
+        echo "  New Password: $NEW_PASSWORD"
+        echo ""
+        echo "  Service Status: ✓ Running"
+        echo "  Config Backup: $BACKUP_FILE"
+        echo ""
+        echo "=========================================="
+        echo "IMPORTANT: Save this password securely!"
+        echo "=========================================="
+        echo ""
+        exit 0
+    else
+        # Failure path with automatic rollback
+        echo "=========================================="
+        echo "PASSWORD RESET FAILED"
+        echo "=========================================="
+        echo ""
+        echo "  Service Status: ✗ Failed to start"
+        echo "  Restoring backup configuration..."
+
+        cp "$BACKUP_FILE" /etc/isc-web-dhcp-manager/config.conf
+        chown dhcp-manager:dhcp-manager /etc/isc-web-dhcp-manager/config.conf
+        chmod 640 /etc/isc-web-dhcp-manager/config.conf
+
+        echo "  Configuration restored to previous state"
+        echo "  Restarting service with old configuration..."
+        systemctl restart dhcp-manager.service
+
+        # Give service time to restart
+        sleep 2
+
+        if systemctl is-active --quiet dhcp-manager.service; then
+            echo "  Service restored successfully with old password"
+        else
+            echo "  WARNING: Service still not running. Manual intervention required."
+        fi
+
+        echo ""
+        echo "  Check logs: sudo journalctl -u dhcp-manager -n 50"
+        echo "=========================================="
+        exit 1
+    fi
+fi
+
 # Auto-detect script directory (when running from local file)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SOURCE="${SCRIPT_DIR}"
@@ -87,11 +252,33 @@ TLS_CERT_PATH="/etc/nginx/ssl/dhcp-manager.crt"
 TLS_KEY_PATH="/etc/nginx/ssl/dhcp-manager.key"
 TLS_DIR="/etc/nginx/ssl"
 
-# Check if ISC DHCP Server is already installed before we install packages
-# This helps us determine if the config file is from a previous installation
+# ============================================================
+# Installation Detection - Check Once at Start
+# ============================================================
+
+# Check if ISC DHCP Server is already installed
+# This helps us determine if the DHCP config file is from a previous installation
 DHCP_WAS_INSTALLED=false
 if systemctl list-unit-files 2>/dev/null | grep -q 'isc-dhcp-server.service'; then
     DHCP_WAS_INSTALLED=true
+fi
+
+# Check if DHCP Manager is already installed
+EXISTING_INSTALL=false
+SKIP_RECONFIGURE=false
+if [ -d "/etc/isc-web-dhcp-manager" ]; then
+    EXISTING_INSTALL=true
+    echo "=== Existing DHCP Manager installation detected ==="
+
+    if [ "$FORCE_RESET" = "true" ]; then
+        echo "Reset mode enabled - will reconfigure all services"
+        SKIP_RECONFIGURE=false
+    else
+        echo "Preserving existing configuration (TLS, nginx, passwords)"
+        echo "To force reconfiguration, run with --reset flag"
+        SKIP_RECONFIGURE=true
+    fi
+    echo ""
 fi
 
 echo "Step 1: Installing system dependencies..."
@@ -127,22 +314,26 @@ chown -R www-data:www-data "$WEB_ROOT"
 
 echo ""
 
-echo "Step 6: Generating self-signed SSL certificate..."
+if [ "$SKIP_RECONFIGURE" = "true" ]; then
+    echo "Step 6: Skipping TLS certificate generation (preserving existing)"
+    echo ""
+else
+    echo "Step 6: Generating self-signed SSL certificate..."
 
-# Get server FQDN and hostname
-SERVER_FQDN=$(hostname -f)
-SERVER_HOSTNAME=$(hostname -s)
-SERVER_IP=$(hostname -I | awk '{print $1}')
+    # Get server FQDN and hostname
+    SERVER_FQDN=$(hostname -f)
+    SERVER_HOSTNAME=$(hostname -s)
+    SERVER_IP=$(hostname -I | awk '{print $1}')
 
-echo "Server FQDN: $SERVER_FQDN"
-echo "Server Hostname: $SERVER_HOSTNAME"
-echo "Server IP: $SERVER_IP"
+    echo "Server FQDN: $SERVER_FQDN"
+    echo "Server Hostname: $SERVER_HOSTNAME"
+    echo "Server IP: $SERVER_IP"
 
-# Create TLS directory
-mkdir -p "$TLS_DIR"
+    # Create TLS directory
+    mkdir -p "$TLS_DIR"
 
-# Create OpenSSL config for SAN (Subject Alternative Names)
-cat > /tmp/openssl-san.cnf <<EOF
+    # Create OpenSSL config for SAN (Subject Alternative Names)
+    cat > /tmp/openssl-san.cnf <<EOF
 [req]
 default_bits = 2048
 prompt = no
@@ -165,44 +356,49 @@ IP.1 = $SERVER_IP
 IP.2 = 127.0.0.1
 EOF
 
-# Generate self-signed certificate with SAN
-openssl req -x509 -nodes -days $CERT_DAYS \
-    -newkey rsa:2048 \
-    -keyout "$TLS_KEY_PATH" \
-    -out "$TLS_CERT_PATH" \
-    -config /tmp/openssl-san.cnf \
-    -extensions req_ext 2>/dev/null
+    # Generate self-signed certificate with SAN
+    openssl req -x509 -nodes -days $CERT_DAYS \
+        -newkey rsa:2048 \
+        -keyout "$TLS_KEY_PATH" \
+        -out "$TLS_CERT_PATH" \
+        -config /tmp/openssl-san.cnf \
+        -extensions req_ext 2>/dev/null
 
-# Set proper permissions
-chmod 600 "$TLS_KEY_PATH"
-chmod 644 "$TLS_CERT_PATH"
+    # Set proper permissions
+    chmod 600 "$TLS_KEY_PATH"
+    chmod 644 "$TLS_CERT_PATH"
 
-# Clean up temp config
-rm -f /tmp/openssl-san.cnf
+    # Clean up temp config
+    rm -f /tmp/openssl-san.cnf
 
-echo "SSL certificate generated:"
-echo "  Certificate: $TLS_CERT_PATH"
-echo "  Private Key: $TLS_KEY_PATH"
-echo "  Common Name: $SERVER_FQDN"
-echo "  SAN: $SERVER_FQDN, $SERVER_HOSTNAME, localhost"
-echo ""
-echo "WARNING: This is a self-signed certificate."
-echo "Browsers will show security warnings on first access."
-echo ""
+    echo "SSL certificate generated:"
+    echo "  Certificate: $TLS_CERT_PATH"
+    echo "  Private Key: $TLS_KEY_PATH"
+    echo "  Common Name: $SERVER_FQDN"
+    echo "  SAN: $SERVER_FQDN, $SERVER_HOSTNAME, localhost"
+    echo ""
+    echo "WARNING: This is a self-signed certificate."
+    echo "Browsers will show security warnings on first access."
+    echo ""
+fi
 
-echo "Step 7: Configuring nginx..."
+if [ "$SKIP_RECONFIGURE" = "true" ]; then
+    echo "Step 7: Skipping nginx configuration (preserving existing)"
+    echo ""
+else
+    echo "Step 7: Configuring nginx..."
 
-# Check for existing installation and preserve port configuration
-if [ -d "/etc/isc-web-dhcp-manager" ] && [ -f "/etc/nginx/sites-available/dhcp-manager" ]; then
+# Determine HTTPS port based on existing installation or port availability
+if [ "$EXISTING_INSTALL" = "true" ] && [ -f "/etc/nginx/sites-available/dhcp-manager" ]; then
     # Existing installation found, check nginx config for current port
     if grep -qFs 'listen 8000' /etc/nginx/sites-available/dhcp-manager 2>/dev/null; then
         HTTPS_PORT=8000
         REDIRECT_PORT=":8000"
-        echo "Existing installation detected using port 8000, preserving configuration"
+        echo "Existing installation using port 8000, preserving configuration"
     elif grep -qFs 'listen 443' /etc/nginx/sites-available/dhcp-manager 2>/dev/null; then
         HTTPS_PORT=443
         REDIRECT_PORT=""
-        echo "Existing installation detected using port 443, preserving configuration"
+        echo "Existing installation using port 443, preserving configuration"
     else
         # Config exists but no recognizable port, fall back to port availability check
         if ss -tuln 2>/dev/null | grep -q ':443 ' || netstat -tuln 2>/dev/null | grep -q ':443 '; then
@@ -288,24 +484,30 @@ server {
 }
 EOF
 
-ln -sf /etc/nginx/sites-available/dhcp-manager /etc/nginx/sites-enabled/
-rm -f /etc/nginx/sites-enabled/default
-nginx -t
-systemctl reload nginx
+    ln -sf /etc/nginx/sites-available/dhcp-manager /etc/nginx/sites-enabled/
+    rm -f /etc/nginx/sites-enabled/default
+    nginx -t
+    systemctl reload nginx
+fi
 
 echo ""
-echo "Step 8: Configuring backend systemd service..."
 
-# Generate random secret key
-SECRET_KEY=$(openssl rand -hex 32)
+if [ "$SKIP_RECONFIGURE" = "true" ]; then
+    echo "Step 8: Skipping backend systemd service configuration (preserving existing)"
+    echo ""
+else
+    echo "Step 8: Configuring backend systemd service..."
 
-# Generate random password for authentication (using venv's bcrypt)
-echo "Generating authentication password..."
-DEFAULT_PASSWORD=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
-DEFAULT_PASSWORD_HASH=$(sudo -u "$BACKEND_USER" bash -c "source /opt/dhcp-manager/backend/venv/bin/activate && python3 -c \"import bcrypt; print(bcrypt.hashpw(b'$DEFAULT_PASSWORD', bcrypt.gensalt(rounds=12)).decode('utf-8'))\"")
+    # Generate random secret key
+    SECRET_KEY=$(openssl rand -hex 32)
+
+    # Generate random password for authentication (using venv's bcrypt)
+    echo "Generating authentication password..."
+    DEFAULT_PASSWORD=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
+    AUTH_PASSWORD_HASH=$(sudo -u "$BACKEND_USER" bash -c "source /opt/dhcp-manager/backend/venv/bin/activate && python3 -c \"import bcrypt; print(bcrypt.hashpw(b'$DEFAULT_PASSWORD', bcrypt.gensalt(rounds=12)).decode('utf-8'))\"")
 
 
-cat > /etc/systemd/system/dhcp-manager.service <<EOF
+    cat > /etc/systemd/system/dhcp-manager.service <<EOF
 [Unit]
 Description=DHCP Manager Backend
 After=network.target
@@ -326,7 +528,8 @@ RestartSec=3
 WantedBy=multi-user.target
 EOF
 
-echo "Configuring of backend systemd service completed"
+    echo "Configuring of backend systemd service completed"
+fi
 
 echo ""
 echo "Step 9: Creating application configuration directory..."
@@ -342,6 +545,26 @@ chmod 770 /etc/isc-web-dhcp-manager/backups
 cp "$CONFIG_SOURCE/config_schema.json" /etc/isc-web-dhcp-manager/config_schema.json
 chown "$BACKEND_USER":"$BACKEND_USER" /etc/isc-web-dhcp-manager/config_schema.json
 chmod 644 /etc/isc-web-dhcp-manager/config_schema.json
+
+# Preserve existing SECRET_KEY and AUTH_PASSWORD_HASH if skipping reconfiguration
+if [ "$SKIP_RECONFIGURE" = "true" ] && [ -f "/etc/isc-web-dhcp-manager/config.conf" ]; then
+    echo "Preserving existing SECRET_KEY and AUTH_PASSWORD_HASH from config..."
+    # Extract existing values from config file
+    SECRET_KEY=$(grep '^SECRET_KEY=' /etc/isc-web-dhcp-manager/config.conf | cut -d'=' -f2)
+    AUTH_PASSWORD_HASH=$(grep '^AUTH_PASSWORD_HASH=' /etc/isc-web-dhcp-manager/config.conf | cut -d'=' -f2-)
+    DEFAULT_PASSWORD="<unchanged>"
+
+    # If extraction failed, generate new values as fallback
+    if [ -z "$SECRET_KEY" ]; then
+        echo "WARNING: Could not extract SECRET_KEY, generating new one"
+        SECRET_KEY=$(openssl rand -hex 32)
+    fi
+    if [ -z "$AUTH_PASSWORD_HASH" ]; then
+        echo "WARNING: Could not extract AUTH_PASSWORD_HASH, generating new one"
+        DEFAULT_PASSWORD=$(openssl rand -base64 16 | tr -d '=+/' | cut -c1-16)
+        AUTH_PASSWORD_HASH=$(sudo -u "$BACKEND_USER" bash -c "source /opt/dhcp-manager/backend/venv/bin/activate && python3 -c \"import bcrypt; print(bcrypt.hashpw(b'$DEFAULT_PASSWORD', bcrypt.gensalt(rounds=12)).decode('utf-8'))\"")
+    fi
+fi
 
 # Create application config file
 cat > /etc/isc-web-dhcp-manager/config.conf <<APPCONFEOF
@@ -393,7 +616,7 @@ TLS_ENABLED=true
 
 # Authentication
 AUTH_ENABLED=true
-AUTH_PASSWORD_HASH=$DEFAULT_PASSWORD_HASH
+AUTH_PASSWORD_HASH=$AUTH_PASSWORD_HASH
 AUTH_TOKEN_EXPIRY_HOURS=24
 
 # Debug Mode
@@ -692,12 +915,19 @@ echo ""
 echo "=========================================="
 echo "AUTHENTICATION CREDENTIALS"
 echo "=========================================="
-echo "  Username: (none - password only)"
-echo "  Password: $DEFAULT_PASSWORD"
-echo ""
-echo "IMPORTANT: Change this password immediately after login!"
-echo "  - Go to App Settings > Authentication"
-echo "  - Or re-run this deployment script to generate a new password"
+if [ "$SKIP_RECONFIGURE" = "true" ]; then
+    echo "  Existing installation - password unchanged"
+    echo ""
+    echo "  Use your existing password to login"
+    echo "  To reset password, run: sudo $0 --reset"
+else
+    echo "  Username: (none - password only)"
+    echo "  Password: $DEFAULT_PASSWORD"
+    echo ""
+    echo "IMPORTANT: Change this password immediately after login!"
+    echo "  - Go to App Settings > Authentication"
+    echo "  - Or re-run this deployment script with --reset to generate a new password"
+fi
 echo "=========================================="
 echo ""
 
