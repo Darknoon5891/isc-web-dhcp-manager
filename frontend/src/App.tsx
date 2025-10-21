@@ -245,7 +245,9 @@ function App() {
               <button
                 className="dark-mode-toggle"
                 onClick={() => setDarkMode(!darkMode)}
-                title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
+                title={
+                  darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"
+                }
               >
                 <img
                   src={darkMode ? sunIcon : moonIcon}
@@ -316,7 +318,7 @@ function App() {
             className={`tab ${activeTab === "config" ? "active" : ""}`}
             onClick={() => handleTabChange("config")}
           >
-            ISC DHCP Service Status
+            DHCP Services Management
           </button>
           <button
             className={`tab ${activeTab === "appsettings" ? "active" : ""}`}

@@ -345,7 +345,7 @@ sudo systemctl status dhcp-manager
 sudo systemctl status isc-dhcp-server
 sudo systemctl status nginx
 
-# Or view in web interface under "ISC DHCP Service Status" tab
+# Or view in web interface under "DHCP Services Management" tab
 ```
 
 ## Troubleshooting
@@ -425,7 +425,7 @@ To use custom certificates:
 2. Navigate to App Settings tab
 3. Update `TLS_CERT_PATH` and `TLS_KEY_PATH` fields
 4. Save settings
-5. Restart Nginx from "ISC DHCP Service Status" tab
+5. Restart Nginx from "DHCP Services Management" tab
 
 ### Firewall Configuration
 
