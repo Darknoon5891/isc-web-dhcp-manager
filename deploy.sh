@@ -279,7 +279,7 @@ fi
 
 echo "Step 1: Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3 python3-venv nginx curl openssl
+sudo apt-get install -y python python-venv nginx curl openssl
 # install isc-dhcp-server as a special case as it writes a default/invalid config and then attempts to start
 # redirect stdout to null until we can write the correct config: 
 sudo apt-get install -y isc-dhcp-server 1>/dev/null
@@ -425,15 +425,23 @@ else
     fi
 fi
 
-cat > /etc/nginx/sites-available/dhcp-manager <<EOF
-# HTTP server - redirect to HTTPS
+# Skip the HTTP→HTTPS redirect block when port 80 is already bound
+# (e.g. Pi-hole FTL, lighttpd, Apache on the same host). Users access via HTTPS port directly.
+if ss -tln sport = :80 2>/dev/null | awk 'NR>1' | grep -q .; then
+    HTTP_REDIRECT_BLOCK="# :80 already bound by another service; HTTP→HTTPS redirect disabled"
+else
+    HTTP_REDIRECT_BLOCK="# HTTP server - redirect to HTTPS
 server {
     listen 80;
     server_name _;
 
     # Redirect all HTTP traffic to HTTPS
     return 301 https://\$host$REDIRECT_PORT\$request_uri;
-}
+}"
+fi
+
+cat > /etc/nginx/sites-available/dhcp-manager <<EOF
+$HTTP_REDIRECT_BLOCK
 
 # HTTPS server
 server {
