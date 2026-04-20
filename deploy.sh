@@ -279,7 +279,7 @@ fi
 
 echo "Step 1: Installing system dependencies..."
 sudo apt-get update
-sudo apt-get install -y python3.11 python3.11-venv nginx curl openssl
+sudo apt-get install -y python3 python3-venv nginx curl openssl
 # install isc-dhcp-server as a special case as it writes a default/invalid config and then attempts to start
 # redirect stdout to null until we can write the correct config: 
 sudo apt-get install -y isc-dhcp-server 1>/dev/null
